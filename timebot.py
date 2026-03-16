@@ -97,7 +97,7 @@ def parse_time_minutes(text: str) -> int:
     Parse time durations from free-form comment text.
 
     Recognized patterns (case-insensitive):
-      2h  2hr  2hrs  2 hours  2.5h  2.5 hours
+      2h  2hr  2hrs  2 hours  2.5h  2.5 hours  .5h  .5 hours  .25 hours
       30m  30min  30 mins  30 minutes  0.5h
       1:30  (H:MM treated as hours:minutes)
 
@@ -106,16 +106,17 @@ def parse_time_minutes(text: str) -> int:
     total = 0.0
     lower = text.lower()
 
-    # H:MM  (must NOT be preceded by digits — avoids matching timestamps)
+    # H:MM  (must NOT be preceded by digits — avoids matching timestamps like "09:00")
     for m in re.finditer(r"(?<!\d)(\d+):(\d{2})(?!\d)", lower):
         total += int(m.group(1)) * 60 + int(m.group(2))
 
-    # Nh / N.Nh / N hours
-    for m in re.finditer(r"(\d+(?:\.\d+)?)\s*h(?:r|rs|our|ours)?(?!\w)", lower):
+    # Nh / N.Nh / .Nh — supports leading-dot decimals like .5h or .25 hours
+    # (?<!\d) prevents matching digits inside larger numbers (e.g. "25" in ".25")
+    for m in re.finditer(r"(?<!\d)(\d*\.\d+|\d+)\s*h(?:r|rs|our|ours)?(?!\w)", lower):
         total += float(m.group(1)) * 60
 
-    # Nm / N.Nm / N min / N minutes
-    for m in re.finditer(r"(\d+(?:\.\d+)?)\s*m(?:in|ins|inute|inutes)?(?!\w)", lower):
+    # Nm / N.Nm / .Nm — same leading-dot support for minutes
+    for m in re.finditer(r"(?<!\d)(\d*\.\d+|\d+)\s*m(?:in|ins|inute|inutes)?(?!\w)", lower):
         total += float(m.group(1))
 
     return round(total)
