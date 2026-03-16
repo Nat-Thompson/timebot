@@ -1,0 +1,23 @@
+# Environment / secrets
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+env/
+
+# Reports (keep the folder, ignore generated files)
+daily_reports/*.md
+daily_reports/*.csv
+
+# OS
+.DS_Store
+Thumbs.db
