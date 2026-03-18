@@ -264,39 +264,220 @@ def write_markdown(summaries: list, today: date) -> Path:
     return path
 
 
+def write_html(summaries: list, today: date) -> Path:
+    REPORTS_DIR.mkdir(exist_ok=True)
+    path = REPORTS_DIR / f"{today}.html"
+
+    by_tag: dict[str, list] = {}
+    for s in summaries:
+        by_tag.setdefault(s["tag"], []).append(s)
+
+    total_mins  = sum(s["minutes"] for s in summaries)
+    generated   = datetime.now(CENTRAL_TZ).strftime("%Y-%m-%d %I:%M %p")
+
+    def esc(t: str) -> str:
+        return (t.replace("&", "&amp;").replace("<", "&lt;")
+                 .replace(">", "&gt;").replace('"', "&quot;"))
+
+    # ── tag sections ──────────────────────────────────────────────────────────
+    sections = ""
+    for tag in sorted(by_tag.keys()):
+        cards    = by_tag[tag]
+        tag_mins = sum(c["minutes"] for c in cards)
+
+        cards_html = ""
+        for s in cards:
+            movements_html = ""
+            if s["movements"]:
+                items = "".join(f"<li>{esc(mv)}</li>" for mv in s["movements"])
+                movements_html = f"<div class='meta-label'>Movements</div><ul class='movements'>{items}</ul>"
+
+            comments_html = ""
+            if s["comments"]:
+                items = "".join(f"<blockquote>{esc(c.strip())}</blockquote>" for c in s["comments"])
+                comments_html = f"<div class='meta-label'>Comments</div>{items}"
+
+            time_cls = "time-logged" if s["minutes"] else "time-none"
+            cards_html += f"""
+            <div class='card'>
+              <div class='card-header'>
+                <span class='card-title'><a href='{esc(s["url"])}' target='_blank'>{esc(s["title"])}</a></span>
+                <span class='{time_cls}'>{esc(minutes_to_str(s["minutes"]))}</span>
+              </div>
+              <div class='card-meta'>
+                <span class='status-badge'>{esc(s["list"])}</span>
+              </div>
+              {movements_html}
+              {comments_html}
+            </div>"""
+
+        sections += f"""
+        <div class='tag-section'>
+          <div class='tag-header'>
+            <span class='tag-name'>[{esc(tag)}]</span>
+            <span class='tag-meta'>{len(cards)} card(s) &nbsp;·&nbsp; {esc(minutes_to_str(tag_mins))}</span>
+          </div>
+          {cards_html}
+        </div>"""
+
+    # ── summary table ─────────────────────────────────────────────────────────
+    rows = ""
+    for s in summaries:
+        rows += f"""
+        <tr>
+          <td><span class='tag-pill'>{esc(s["tag"])}</span></td>
+          <td><a href='{esc(s["url"])}' target='_blank'>{esc(s["title"])}</a></td>
+          <td>{esc(s["list"])}</td>
+          <td class='time-cell'>{esc(minutes_to_str(s["minutes"]))}</td>
+        </tr>"""
+
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Work Report — {today}</title>
+  <style>
+    *, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
+    body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            background: #f4f6f9; color: #1a1a2e; line-height: 1.5; }}
+    a {{ color: #0066cc; text-decoration: none; }}
+    a:hover {{ text-decoration: underline; }}
+
+    .page-header {{ background: #1a1a2e; color: #fff; padding: 2rem 2.5rem; }}
+    .page-header h1 {{ font-size: 1.6rem; font-weight: 600; }}
+    .page-header .meta {{ margin-top: .4rem; font-size: .85rem; opacity: .75; }}
+    .kpi-bar {{ display: flex; gap: 1.5rem; margin-top: 1rem; }}
+    .kpi {{ background: rgba(255,255,255,.1); border-radius: 8px;
+             padding: .5rem 1rem; font-size: .9rem; }}
+    .kpi strong {{ display: block; font-size: 1.3rem; }}
+
+    .content {{ max-width: 960px; margin: 2rem auto; padding: 0 1.5rem 3rem; }}
+
+    .tag-section {{ background: #fff; border-radius: 10px; margin-bottom: 1.5rem;
+                    box-shadow: 0 1px 4px rgba(0,0,0,.08); overflow: hidden; }}
+    .tag-header {{ background: #eef2ff; padding: .75rem 1.25rem;
+                   display: flex; justify-content: space-between; align-items: center; }}
+    .tag-name {{ font-weight: 700; font-size: 1rem; color: #3730a3; }}
+    .tag-meta {{ font-size: .8rem; color: #6b7280; }}
+
+    .card {{ padding: 1rem 1.25rem; border-top: 1px solid #f0f0f0; }}
+    .card-header {{ display: flex; justify-content: space-between;
+                    align-items: flex-start; gap: 1rem; }}
+    .card-title {{ font-weight: 600; font-size: .95rem; }}
+    .time-logged {{ background: #d1fae5; color: #065f46; font-size: .8rem;
+                    font-weight: 600; padding: .2rem .6rem; border-radius: 99px;
+                    white-space: nowrap; }}
+    .time-none {{ color: #9ca3af; font-size: .8rem; white-space: nowrap; }}
+    .card-meta {{ margin-top: .3rem; }}
+    .status-badge {{ background: #e0e7ff; color: #3730a3; font-size: .75rem;
+                     padding: .15rem .5rem; border-radius: 4px; }}
+    .meta-label {{ font-size: .75rem; font-weight: 600; color: #6b7280;
+                   text-transform: uppercase; letter-spacing: .05em;
+                   margin-top: .75rem; margin-bottom: .25rem; }}
+    .movements {{ padding-left: 1.2rem; font-size: .85rem; color: #4b5563; }}
+    .movements li {{ margin-bottom: .15rem; }}
+    blockquote {{ border-left: 3px solid #e0e7ff; padding: .4rem .8rem;
+                  margin: .25rem 0; font-size: .85rem; color: #374151;
+                  background: #f9fafb; border-radius: 0 4px 4px 0; }}
+
+    .summary-section {{ margin-top: 2.5rem; }}
+    .summary-section h2 {{ font-size: 1.1rem; font-weight: 600; margin-bottom: .75rem; }}
+    table {{ width: 100%; border-collapse: collapse; background: #fff;
+             border-radius: 10px; overflow: hidden;
+             box-shadow: 0 1px 4px rgba(0,0,0,.08); }}
+    th {{ background: #1a1a2e; color: #fff; padding: .6rem 1rem;
+          font-size: .8rem; text-align: left; font-weight: 600; }}
+    td {{ padding: .65rem 1rem; font-size: .85rem;
+          border-bottom: 1px solid #f0f0f0; }}
+    tr:last-child td {{ border-bottom: none; }}
+    .tag-pill {{ background: #eef2ff; color: #3730a3; font-size: .75rem;
+                 font-weight: 600; padding: .15rem .5rem; border-radius: 4px; }}
+    .time-cell {{ font-weight: 600; color: #065f46; }}
+    .total-row td {{ font-weight: 700; background: #f9fafb; }}
+
+    footer {{ text-align: center; font-size: .75rem; color: #9ca3af; margin-top: 2rem; }}
+  </style>
+</head>
+<body>
+  <div class="page-header">
+    <h1>Daily Work Report &mdash; {today}</h1>
+    <div class="meta">Generated {generated} Central</div>
+    <div class="kpi-bar">
+      <div class="kpi"><strong>{len(summaries)}</strong>Cards</div>
+      <div class="kpi"><strong>{esc(minutes_to_str(total_mins))}</strong>Total Time</div>
+      <div class="kpi"><strong>{len(by_tag)}</strong>Clients</div>
+    </div>
+  </div>
+
+  <div class="content">
+    {sections}
+
+    <div class="summary-section">
+      <h2>Summary Table</h2>
+      <table>
+        <thead><tr><th>Client</th><th>Card</th><th>Status</th><th>Time</th></tr></thead>
+        <tbody>
+          {rows}
+          <tr class="total-row">
+            <td colspan="3">Total</td>
+            <td class="time-cell">{esc(minutes_to_str(total_mins))}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <footer>Generated by <a href="https://github.com/Nat-Thompson/timebot">Timebot</a></footer>
+</body>
+</html>"""
+
+    path.write_text(html, encoding="utf-8")
+    log.info("HTML → %s", path)
+    return path
+
+
 # ── Main ───────────────────────────────────────────────────────────────────────
-def run():
+def run(report_date: date = None):
     if not TRELLO_API_KEY or not TRELLO_API_TOKEN:
         log.error("TRELLO_API_KEY and TRELLO_API_TOKEN must be set in .env")
         raise SystemExit(1)
 
-    today = datetime.now(CENTRAL_TZ).date()
-    log.info("Timebot starting — reporting for %s", today)
+    target = report_date or datetime.now(CENTRAL_TZ).date()
+    log.info("Timebot starting — reporting for %s", target)
 
     list_map = get_board_lists()
-    cards    = get_cards_updated_today(today)
-    log.info("Cards updated today: %d", len(cards))
+    cards    = get_cards_updated_today(target)
+    log.info("Cards updated on %s: %d", target, len(cards))
 
     summaries = []
     for card in cards:
-        actions = get_card_actions_today(card["id"], today)
+        actions = get_card_actions_today(card["id"], target)
         summaries.append(summarize_card(card, actions, list_map))
 
-    # Sort by tag, then card title
     summaries.sort(key=lambda s: (s["tag"].lower(), s["title"].lower()))
 
-    csv_path = write_csv(summaries, today)
-    md_path  = write_markdown(summaries, today)
+    csv_path  = write_csv(summaries, target)
+    md_path   = write_markdown(summaries, target)
+    html_path = write_html(summaries, target)
 
     print(f"\n{'='*55}")
-    print(f"  Timebot — {today}")
+    print(f"  Timebot — {target}")
     print(f"  Cards processed : {len(summaries)}")
     print(f"  Total time      : {minutes_to_str(sum(s['minutes'] for s in summaries))}")
     print(f"  CSV report      : {csv_path}")
     print(f"  Markdown report : {md_path}")
+    print(f"  HTML report     : {html_path}")
     print(f"{'='*55}\n")
     return summaries
 
 
 if __name__ == "__main__":
-    run()
+    import sys
+    from datetime import timedelta
+    if len(sys.argv) > 1 and sys.argv[1] == "--yesterday":
+        run(datetime.now(CENTRAL_TZ).date() - timedelta(days=1))
+    elif len(sys.argv) > 1:
+        run(date.fromisoformat(sys.argv[1]))
+    else:
+        run()
