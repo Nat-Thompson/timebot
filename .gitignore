@@ -14,13 +14,8 @@ build/
 venv/
 env/
 
-# Reports (keep the folder, ignore generated files)
-daily_reports/*.md
-daily_reports/*.csv
-daily_reports/*.html
-
-# Logs
-logs/*.log
+# Lambda build artifact
+timebot.zip
 
 # OS
 .DS_Store

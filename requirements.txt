@@ -1,4 +1,6 @@
+# Lambda dependencies (packaged into deployment zip)
 requests>=2.31.0
-python-dotenv>=1.0.0
 tzdata>=2024.1
+
+# boto3 is provided by the Lambda runtime — listed here for local dev only
 boto3>=1.34.0

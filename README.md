@@ -1,30 +1,37 @@
-# Timebot
+# TIMEBOT
 
-Automated daily work reporter for Savvy Otter. Reads the [Savvy Otter Items](https://trello.com/b/mdS3ny24/savvy-otter-items) Trello board each day at **5:00 PM Central**, finds cards that were created or updated that day, extracts time entries from card comments, and generates two reports per day.
+Automated daily work reporter for Savvy Otter. An AWS Lambda function triggered every day at **5:00 PM Central** via EventBridge Scheduler. Reads the [Savvy Otter Items](https://trello.com/b/mdS3ny24/savvy-otter-items) Trello board, finds cards created or updated that day, extracts time entries from comments, and emails a styled HTML report via SES.
 
 ---
 
-## Reports
+## Architecture
 
-Each run produces two files in `daily_reports/`:
+```
+EventBridge Scheduler (cron 0 17 * * ? *, America/Chicago)
+    └─▶ Lambda: timebot (python3.12)
+            ├─▶ Trello API  — fetch updated cards + actions
+            └─▶ AWS SES     — send HTML email report
+```
 
-| File | Description |
+**AWS Resources:**
+| Resource | Name / ARN |
 |---|---|
-| `YYYY-MM-DD.md` | Verbose markdown report grouped by client/project tag |
-| `YYYY-MM-DD.csv` | Flat CSV for spreadsheet import or tracking |
-
-> Note: `daily_reports/` is in `.gitignore` — reports are local only.
+| Lambda function | `timebot` (us-east-1) |
+| Lambda exec role | `lambda_exec_timebot` |
+| EventBridge schedule | `timebot-daily-5pm` |
+| Scheduler role | `scheduler_exec_timebot` |
+| SES sending domain | `savvyottermations.com` (verified) |
 
 ---
 
 ## Card Format
 
-Cards on the Trello board should be named with a `[TAG]` prefix to identify the client or project:
+Cards should be named with a `[TAG]` prefix identifying the client or project:
 
 ```
 [Acme Corp] Fix login bug
-[Internal] Update deployment pipeline
-[Project Phoenix] Design review
+[SAVVYOTTER] Internal planning meeting
+[HEARTLAND] Address server offline
 ```
 
 Cards without a tag are grouped under **Uncategorized**.
@@ -33,102 +40,82 @@ Cards without a tag are grouped under **Uncategorized**.
 
 ## Time Logging
 
-Timebot scans **card comments** posted today for time entries. Supported formats (case-insensitive):
+TIMEBOT scans **card comments** posted today for explicit duration entries. Supported formats (case-insensitive):
 
 | You write | Interpreted as |
 |---|---|
 | `2h` / `2hr` / `2 hours` | 2 hours |
-| `30m` / `30min` / `30 minutes` | 30 minutes |
+| `30m` / `30 min` / `30 minutes` | 30 minutes |
 | `1.5h` / `1.5 hours` | 1 hour 30 minutes |
-| `1:30` | 1 hour 30 minutes |
-| `2h 30m` | 2 hours 30 minutes |
+| `.5 hours` / `.25 hours` | 30 min / 15 min |
 
-Time entries can appear anywhere in a comment alongside other text, e.g.:
-> "Finished the API integration. 1.5h spent on debugging the auth flow."
+Time entries can appear anywhere in the comment alongside timestamps:
+
+> `9:00 - 9:15 am — Set up email report — 0.25 hours`
+> `5 am to 8 am - Deep work on API — 3 hours`
+
+Clock times (like `9:00`, `10:15 am`) are intentionally ignored — only explicit durations (`0.25 hours`, `3 hours`) are counted.
 
 ---
 
-## Setup
+## Email Report
+
+**Subject:** `TIMEBOT | 2026-03-18 | 5 cards | 4h 50m`
+
+The HTML body includes:
+- KPI header (card count, total time, client count)
+- Per-client sections with card details, status movements, and comment text
+- Summary table with total row
+
+---
+
+## Lambda Environment Variables
+
+| Variable | Default | Description |
+|---|---|---|
+| `TRELLO_API_KEY` | *(required)* | Trello API key |
+| `TRELLO_API_TOKEN` | *(required)* | Trello API token |
+| `TRELLO_BOARD_ID` | `mdS3ny24` | Board short ID |
+| `SES_FROM` | `TIMEBOT <noreply@savvyottermations.com>` | Sender address |
+| `SES_TO` | `nat.thompson@savvyotter.com` | Recipient address |
+| `SES_REGION` | `us-east-1` | AWS region for SES |
+
+---
+
+## Deployment
 
 ### Prerequisites
 - Python 3.11+
-- A Trello account with API access
+- AWS CLI configured with `savvyotter` profile
+- `savvyottermations.com` verified in SES
 
-### Install
-
-```bash
-git clone https://github.com/Savvyotter/timebot.git
-cd timebot
-pip install -r requirements.txt
-cp .env.example .env
-# Edit .env and fill in your credentials
-```
-
-### Environment Variables
-
-```env
-TRELLO_API_KEY=your_trello_api_key
-TRELLO_API_TOKEN=your_trello_api_token
-TRELLO_BOARD_ID=mdS3ny24
-```
-
-Get your API key and token at: https://trello.com/app-key
-
----
-
-## Running Manually
+### Package & Deploy
 
 ```bash
-python timebot.py
+# Install dependencies into build/
+pip install requests tzdata -t build/
+cp lambda_function.py build/
+
+# Zip (Windows)
+cd build && powershell Compress-Archive -Path * -DestinationPath ../timebot.zip -Force && cd ..
+
+# Update Lambda
+aws lambda update-function-code \
+  --profile savvyotter \
+  --region us-east-1 \
+  --function-name timebot \
+  --zip-file fileb://timebot.zip
 ```
 
-Output will be written to `daily_reports/YYYY-MM-DD.md` and `daily_reports/YYYY-MM-DD.csv`.
+### Test
 
----
-
-## Automated Schedule
-
-Timebot is scheduled to run daily at **5:00 PM Central Time** via Claude Code's built-in cron scheduler. The job fires automatically when the Claude Code session is active.
-
----
-
-## Report Structure
-
-### Markdown Report (`YYYY-MM-DD.md`)
-
-```
-# Daily Work Report — 2026-03-16
-
-> Generated: 2026-03-16 05:00 PM Central
-> Cards updated today: 4
-> Total logged time: 5h 30m
-
----
-
-## [Acme Corp]
-*2 card(s) · 3h*
-
-### Fix login bug
-- Status: Done
-- Time Logged: 1h 30m
-- Card URL: https://trello.com/...
-- Comments today:
-  > Fixed the auth token expiry issue. 1.5h
-
-...
-
-## Summary Table
-| Tag / Client | Card | Status | Time Logged |
-|---|---|---|---|
-| Acme Corp | Fix login bug | Done | 1h 30m |
-...
-```
-
-### CSV Report (`YYYY-MM-DD.csv`)
-
-```csv
-Date,Tag/Client,Card Title,Status/List,Time Logged,Activity,URL
-2026-03-16,Acme Corp,Fix login bug,Done,1h 30m,,https://trello.com/...
+```bash
+aws lambda invoke \
+  --profile savvyotter \
+  --region us-east-1 \
+  --function-name timebot \
+  --log-type Tail \
+  response.json
 ```
 
 ---
@@ -137,16 +124,13 @@ Date,Tag/Client,Card Title,Status/List,Time Logged,Activity,URL
 
 ```
 timebot/
-├── timebot.py          # Main script
-├── requirements.txt    # Python dependencies
-├── .env.example        # Environment variable template
+├── lambda_function.py   # Lambda handler — all logic
+├── requirements.txt     # Python dependencies
+├── .env.example         # Local dev env template
 ├── .gitignore
-├── README.md
-└── daily_reports/      # Generated reports (gitignored)
-    ├── 2026-03-16.md
-    └── 2026-03-16.csv
+└── README.md
 ```
 
 ---
 
-*Maintained by [Savvy Otter](https://github.com/Savvyotter)*
+*Maintained by [Savvy Otter](https://github.com/Nat-Thompson)*
