@@ -2,7 +2,8 @@
 """
 Timebot - Daily Trello work summarizer for Savvy Otter
 Reads the Trello board for cards updated today, parses [CLIENT/PROJECT] tags,
-extracts time entries from comments, and generates CSV + Markdown reports.
+extracts time entries from comments, and generates CSV + Markdown + HTML reports,
+then emails the HTML report via AWS SES.
 """
 
 import os
@@ -13,6 +14,7 @@ from datetime import datetime, date
 from zoneinfo import ZoneInfo
 from pathlib import Path
 
+import boto3
 import requests
 from dotenv import load_dotenv
 
@@ -22,6 +24,10 @@ load_dotenv()
 TRELLO_API_KEY   = os.getenv("TRELLO_API_KEY")
 TRELLO_API_TOKEN = os.getenv("TRELLO_API_TOKEN")
 TRELLO_BOARD_ID  = os.getenv("TRELLO_BOARD_ID", "mdS3ny24")
+SES_FROM         = os.getenv("SES_FROM", "TIMEBOT <noreply@savvyottermations.com>")
+SES_TO           = os.getenv("SES_TO", "nat.thompson@savvyotter.com")
+SES_REGION       = os.getenv("SES_REGION", "us-east-1")
+SES_PROFILE      = os.getenv("SES_PROFILE", "savvyotter")
 CENTRAL_TZ       = ZoneInfo("America/Chicago")
 BASE_DIR         = Path(__file__).parent
 REPORTS_DIR      = BASE_DIR / "daily_reports"
@@ -434,7 +440,24 @@ def write_html(summaries: list, today: date) -> Path:
 
     path.write_text(html, encoding="utf-8")
     log.info("HTML → %s", path)
-    return path
+    return path, html
+
+
+# ── Email ──────────────────────────────────────────────────────────────────────
+def send_email(subject: str, html_body: str) -> None:
+    session = boto3.Session(profile_name=SES_PROFILE, region_name=SES_REGION)
+    client  = session.client("sesv2")
+    client.send_email(
+        FromEmailAddress=SES_FROM,
+        Destination={"ToAddresses": [SES_TO]},
+        Content={
+            "Simple": {
+                "Subject": {"Data": subject, "Charset": "UTF-8"},
+                "Body":    {"Html": {"Data": html_body, "Charset": "UTF-8"}},
+            }
+        },
+    )
+    log.info("Email sent → %s", SES_TO)
 
 
 # ── Main ───────────────────────────────────────────────────────────────────────
@@ -457,17 +480,22 @@ def run(report_date: date = None):
 
     summaries.sort(key=lambda s: (s["tag"].lower(), s["title"].lower()))
 
-    csv_path  = write_csv(summaries, target)
-    md_path   = write_markdown(summaries, target)
-    html_path = write_html(summaries, target)
+    csv_path          = write_csv(summaries, target)
+    md_path           = write_markdown(summaries, target)
+    html_path, html   = write_html(summaries, target)
+
+    total_mins = sum(s["minutes"] for s in summaries)
+    subject    = f"TIMEBOT | {target} | {len(summaries)} cards | {minutes_to_str(total_mins)}"
+    send_email(subject, html)
 
     print(f"\n{'='*55}")
     print(f"  Timebot — {target}")
     print(f"  Cards processed : {len(summaries)}")
-    print(f"  Total time      : {minutes_to_str(sum(s['minutes'] for s in summaries))}")
+    print(f"  Total time      : {minutes_to_str(total_mins)}")
     print(f"  CSV report      : {csv_path}")
     print(f"  Markdown report : {md_path}")
     print(f"  HTML report     : {html_path}")
+    print(f"  Email sent to   : {SES_TO}")
     print(f"{'='*55}\n")
     return summaries
 
