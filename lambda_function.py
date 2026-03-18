@@ -31,12 +31,13 @@ SES_REGION       = os.environ.get("SES_REGION", "us-east-1")
 CENTRAL_TZ       = ZoneInfo("America/Chicago")
 
 # Display order for work types in the report
-WORK_TYPE_ORDER = ["Support - Warranty", "Support - Non Warranty", "Project", "Uncategorized"]
+WORK_TYPE_ORDER = ["Support - Warranty", "Support - Non Warranty", "Project", "Operations", "Uncategorized"]
 
 WORK_TYPE_STYLE = {
     "Support - Warranty":     ("wt-warranty",     "⚙ Support - Warranty"),
     "Support - Non Warranty": ("wt-nonwarranty",  "⚙ Support - Non Warranty"),
     "Project":                ("wt-project",      "◈ Project"),
+    "Operations":             ("wt-operations",   "⚑ Operations"),
     "Uncategorized":          ("wt-uncategorized","⚠ Uncategorized"),
 }
 
@@ -346,6 +347,7 @@ def build_html(summaries: list, today: date) -> str:
     .wt-warranty   .wt-header {{ background: #fffbeb; color: #92400e; }}
     .wt-nonwarranty .wt-header {{ background: #eff6ff; color: #1e40af; }}
     .wt-project    .wt-header {{ background: #f0fdf4; color: #166534; }}
+    .wt-operations    .wt-header {{ background: #faf5ff; color: #6b21a8; }}
     .wt-uncategorized .wt-header {{ background: #f9fafb; color: #6b7280; }}
 
     /* Project sub-groups */
@@ -387,6 +389,7 @@ def build_html(summaries: list, today: date) -> str:
     .wt-pill.wt-warranty     {{ background: #fef3c7; color: #92400e; }}
     .wt-pill.wt-nonwarranty  {{ background: #dbeafe; color: #1e40af; }}
     .wt-pill.wt-project      {{ background: #d1fae5; color: #065f46; }}
+    .wt-pill.wt-operations    {{ background: #f3e8ff; color: #6b21a8; }}
     .wt-pill.wt-uncategorized {{ background: #f3f4f6; color: #6b7280; }}
 
     footer {{ text-align: center; font-size: .72rem; color: #9ca3af; margin-top: 1rem; padding-bottom: 2rem; }}
