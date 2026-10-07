@@ -1,0 +1,313 @@
+<title>WATCHER Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Source+Sans+3:wght@400;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a dispatcher's board. Nat's actions lead full width, then a card grid for Doing,
+   then denser lists for everything that is waiting. Pipeline stages render as 8-segment rails. */
+:root {
+  --bg: #eef2f1; --surface: #ffffff; --sunk: #e4eae8; --ink: #15201d; --muted: #586763; --line: #d2dbd8;
+  --accent: #0d6b66; --accent-soft: #d5ebe8;
+  --crit: #b4380b; --crit-soft: #fbe3d6; --warn: #9a6a0c; --warn-soft: #f8ecd0; --ok: #2b7247; --ok-soft: #dcefe2;
+  --display: "Barlow Condensed", "Arial Narrow", "Roboto Condensed", sans-serif;
+  --body: "Source Sans 3", "Segoe UI", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0f1615; --surface: #172120; --sunk: #1d2a28; --ink: #e4ecea; --muted: #93a6a1; --line: #2b3a37;
+  --accent: #4fc2b7; --accent-soft: #173936;
+  --crit: #ff8a5c; --crit-soft: #3a2017; --warn: #e8b84f; --warn-soft: #352a12; --ok: #6fcf94; --ok-soft: #173123;
+  color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #0f1615; --surface: #172120; --sunk: #1d2a28; --ink: #e4ecea; --muted: #93a6a1; --line: #2b3a37;
+  --accent: #4fc2b7; --accent-soft: #173936;
+  --crit: #ff8a5c; --crit-soft: #3a2017; --warn: #e8b84f; --warn-soft: #352a12; --ok: #6fcf94; --ok-soft: #173123;
+  color-scheme: dark }
+
+* { box-sizing: border-box }
+body { background: var(--bg); color: var(--ink); font: 15px/1.45 var(--body); margin: 0 }
+.wrap { max-width: 1240px; margin: 0 auto; padding-inline: 16px; padding-block: 20px 48px; display: grid; gap: 28px }
+a { color: var(--accent); text-decoration: none }
+a:hover { text-decoration: underline }
+a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px }
+.mono { font-family: var(--mono); font-size: 12.5px; font-variant-numeric: tabular-nums }
+.muted { color: var(--muted) }
+
+header.top { display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: end; justify-content: space-between;
+  border-bottom: 2px solid var(--ink); padding-bottom: 12px }
+h1 { font: 700 34px/1 var(--display); letter-spacing: .01em; margin: 0; text-transform: uppercase }
+h1 span { color: var(--accent) }
+.fresh { display: flex; gap: 10px; align-items: center; flex-wrap: wrap }
+.pill { display: inline-flex; align-items: center; gap: 6px; padding: 2px 9px; border-radius: 999px; font: 600 12px/1.6 var(--body);
+  letter-spacing: .03em; white-space: nowrap }
+.pill.ok { background: var(--ok-soft); color: var(--ok) }
+.pill.warn { background: var(--warn-soft); color: var(--warn) }
+.pill.crit { background: var(--crit-soft); color: var(--crit) }
+.pill.plain { background: var(--sunk); color: var(--muted) }
+.pill.acc { background: var(--accent-soft); color: var(--accent) }
+
+.tally { display: flex; flex-wrap: wrap; gap: 8px }
+.tally a { display: flex; gap: 8px; align-items: baseline; padding: 6px 12px; background: var(--surface); border: 1px solid var(--line);
+  border-radius: 6px; color: var(--ink) }
+.tally a:hover { border-color: var(--accent); text-decoration: none }
+.tally b { font: 700 22px/1 var(--display); font-variant-numeric: tabular-nums }
+.tally span { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted) }
+.tally a.hot b { color: var(--crit) }
+
+section > h2 { font: 600 20px/1 var(--display); text-transform: uppercase; letter-spacing: .05em; margin: 0 0 12px;
+  display: flex; gap: 10px; align-items: baseline }
+section > h2 small { font: 500 13px var(--mono); color: var(--muted); letter-spacing: 0 }
+
+/* Actions */
+.actions { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none }
+.act { display: grid; grid-template-columns: 54px 1fr auto; gap: 4px 14px; align-items: start; background: var(--surface);
+  border: 1px solid var(--line); border-left: 5px solid var(--muted); border-radius: 6px; padding: 10px 14px }
+.act.p1 { border-left-color: var(--crit) } .act.p2 { border-left-color: var(--warn) } .act.p3 { border-left-color: var(--accent) }
+.act .pri { font: 700 15px/1.3 var(--display); letter-spacing: .04em }
+.act.p1 .pri { color: var(--crit) } .act.p2 .pri { color: var(--warn) } .act.p3 .pri { color: var(--accent) }
+.act .txt { min-width: 0 }
+.act .meta { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 3px; font-size: 13px; color: var(--muted) }
+.act .side { text-align: right; display: grid; gap: 4px; justify-items: end }
+.done-list { margin-top: 10px; font-size: 13px; color: var(--muted) }
+.done-list s { color: var(--muted) }
+
+/* Card grid */
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 12px }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; display: grid; gap: 8px;
+  align-content: start; min-width: 0 }
+.card .head { display: flex; gap: 8px; align-items: baseline; justify-content: space-between }
+.client { font: 600 12px/1.4 var(--mono); color: var(--muted); letter-spacing: .02em; text-transform: uppercase; overflow-wrap: anywhere }
+.card h3 { font: 600 16px/1.3 var(--body); margin: 0; overflow-wrap: anywhere; text-wrap: balance }
+.card h3 a { color: var(--ink) }
+.status { font-size: 13.5px; color: var(--ink); background: var(--sunk); border-radius: 5px; padding: 6px 9px; overflow-wrap: anywhere }
+.status .when { color: var(--muted); font-family: var(--mono); font-size: 11.5px; margin-right: 6px }
+.status.none { color: var(--muted); font-style: italic }
+.foot { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12.5px; color: var(--muted); align-items: center }
+.foot b { color: var(--ink); font-variant-numeric: tabular-nums }
+
+/* Pipeline rail */
+.rail { display: grid; gap: 4px }
+.rail .segs { display: grid; grid-template-columns: repeat(8, 1fr); gap: 3px }
+.rail .segs i { height: 6px; border-radius: 2px; background: var(--line) }
+.rail .segs i.on { background: var(--accent) }
+.rail .segs i.now { background: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft) }
+.rail .lbl { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted) }
+.rail .lbl b { color: var(--accent); font-weight: 600 }
+
+/* Lists */
+.rows { display: grid; gap: 0; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; margin: 0; padding: 0; list-style: none }
+.rows > li { padding: 10px 14px; border-top: 1px solid var(--line); display: grid; gap: 4px; min-width: 0 }
+.rows > li:first-child { border-top: 0 }
+.rows .line1 { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline }
+.rows .title { font-weight: 600; overflow-wrap: anywhere }
+.rows .sub { font-size: 13.5px; color: var(--muted); overflow-wrap: anywhere }
+.empty { padding: 14px; color: var(--muted); font-style: italic; background: var(--surface); border: 1px dashed var(--line); border-radius: 8px }
+
+.two { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 28px }
+.tbl-wrap { overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 8px }
+table { border-collapse: collapse; width: 100%; min-width: 640px; font-size: 14px }
+th { text-align: left; font: 600 11.5px/1 var(--body); text-transform: uppercase; letter-spacing: .07em; color: var(--muted);
+  padding: 10px 12px; border-bottom: 1px solid var(--line) }
+td { padding: 8px 12px; border-top: 1px solid var(--line); vertical-align: top }
+tr:first-child td { border-top: 0 }
+td.stage { width: 210px }
+tr.stale td { color: var(--muted) }
+
+.note { font-size: 13px; color: var(--muted) }
+.boot { padding: 40px 16px; text-align: center; color: var(--muted) }
+.boot h2 { font: 600 22px var(--display); text-transform: uppercase; color: var(--ink); margin: 0 0 6px }
+
+@media (max-width: 560px) {
+  h1 { font-size: 28px }
+  .act { grid-template-columns: 1fr; }
+  .act .pri { display: none }
+  .act .side { text-align: left; justify-items: start; grid-auto-flow: column; justify-content: start; gap: 8px }
+}
+@media (prefers-reduced-motion: no-preference) { .card, .act { transition: border-color .15s } }
+.card:hover { border-color: var(--accent) }
+</style>
+
+<div class="wrap" id="app">
+  <header class="top">
+    <h1>WATCHER <span>Dashboard</span></h1>
+    <div class="fresh" id="fresh"><span class="pill plain">Connecting to the board snapshot</span></div>
+  </header>
+  <div class="boot" id="boot">
+    <h2>Waiting for WATCHER's first snapshot</h2>
+    <p>This page shows Nat's actions, the Doing column, blockers, deployments, replies owed and today's meetings.
+      WATCHER writes a fresh snapshot at the end of every pass, and the page updates on its own.</p>
+  </div>
+  <div id="content" hidden></div>
+</div>
+
+<script>
+const T = s => "https://trello.com/c/" + encodeURIComponent(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+function ago(h) {
+  if (h == null || isNaN(h)) return "";
+  if (h < 1) return Math.max(1, Math.round(h * 60)) + " min ago";
+  if (h < 48) return Math.round(h) + " h ago";
+  return Math.round(h / 24) + " d ago";
+}
+function dur(m) {
+  if (!m) return "0 min";
+  if (m < 60) return m + " min";
+  const h = Math.floor(m / 60), r = m % 60;
+  return h + " h" + (r ? " " + r + " min" : "");
+}
+function cardLink(s, text) { return s ? `<a href="${T(s)}" target="_blank" rel="noopener">${esc(text || s)}</a>` : ""; }
+function rail(d, compact) {
+  if (!d) return "";
+  const segs = Array.from({length: d.steps}, (_, i) =>
+    `<i class="${i < d.step ? "on" : i === d.step ? "now" : ""}"></i>`).join("");
+  return `<div class="rail" title="Dev Ops: ${esc(d.stage)}"><div class="segs">${segs}</div>` +
+    (compact ? "" : `<div class="lbl"><span>Dev Ops ${cardLink(d.short)}</span><b>${esc(d.label)}</b></div>`) + `</div>`;
+}
+function status(st) {
+  if (!st || !st.text) return `<div class="status none">No status note yet</div>`;
+  return `<div class="status"><span class="when">${esc(ago(st.age_h))}${st.kind ? " &middot; " + esc(st.kind) : ""}</span>${esc(st.text)}</div>`;
+}
+
+function render(s) {
+  const now = Date.now(), gen = Date.parse(s.generated_at), ageMin = (now - gen) / 60000;
+  const freshCls = ageMin < 45 ? "ok" : ageMin < 120 ? "warn" : "crit";
+  document.getElementById("fresh").innerHTML =
+    `<span class="muted">Last refreshed</span> <b class="mono">${esc(s.generated_ct)}</b>` +
+    `<span class="pill ${freshCls}">${ageMin < 1 ? "just now" : esc(ago(ageMin / 60))}</span>`;
+
+  const A = s.actions || [], p1 = A.filter(a => a.priority === 1).length;
+  const nrOld = (s.needs_reply || []).filter(r => (r.age_h || 0) > 24).length;
+  const tally = [
+    ["actions", A.length, "Actions for Nat", p1 > 0],
+    ["doing", (s.doing || []).length, "Doing"],
+    ["blocked", (s.blocked || []).length, "Blocked"],
+    ["withclient", (s.with_client || []).length, "With client"],
+    ["deploys", (s.deployments || []).length, "Deploys in flight"],
+    ["replies", (s.needs_reply || []).length, "Replies owed", nrOld > 0],
+    ["meetings", (s.meetings || []).length, "Meetings today"],
+  ].map(([id, n, label, hot]) => `<a href="#${id}" class="${hot ? "hot" : ""}"><b>${n}</b><span>${label}</span></a>`).join("");
+
+  const actions = A.length ? `<ol class="actions">${A.map(a => `
+    <li class="act p${a.priority || 3}">
+      <div class="pri">P${a.priority || 3}</div>
+      <div class="txt">${esc(a.text)}
+        <div class="meta">
+          ${a.card ? `<span>Card ${cardLink(a.card)}</span>` : ""}
+          ${(a.related || []).map(r => `<span>Also ${cardLink(r)}</span>`).join("")}
+          ${a.devops ? `<span>Dev Ops ${cardLink(a.devops)}</span>` : ""}
+          ${a.where ? `<span>In: ${esc(a.where)}</span>` : ""}
+          ${a.waiting_on ? `<span>Waiting on ${esc(a.waiting_on)}</span>` : ""}
+        </div></div>
+      <div class="side">
+        ${a.due ? `<span class="pill crit">Due ${esc(a.due)}</span>` : ""}
+        <span class="mono muted">open ${esc(ago(a.age_h).replace(" ago", ""))}</span>
+      </div>
+    </li>`).join("")}</ol>` : `<div class="empty">Nothing needs Nat right now.</div>`;
+  const doneA = (s.actions_done || []).length ? `<div class="done-list">Done recently: ${s.actions_done.map(a =>
+    `<s>${esc(a.text)}</s> (${esc(a.done)})`).join("; ")}</div>` : "";
+
+  const doing = (s.doing || []).map(c => `
+    <article class="card">
+      <div class="head"><span class="client">${esc(c.client)}</span><span class="mono muted">${esc(ago(c.age_h))}</span></div>
+      <h3>${cardLink(c.short, c.title)}</h3>
+      ${rail(c.devops)}
+      ${status(c.status)}
+      <div class="foot"><span>Today <b>${dur(c.minutes_today)}</b></span><span>Total <b>${dur(c.minutes_total)}</b></span></div>
+    </article>`).join("");
+
+  const blocked = (s.blocked || []).map(c => `
+    <li><div class="line1"><span class="client">${esc(c.client)}</span><span class="title">${cardLink(c.short, c.title)}</span>
+      ${(c.waits_on || []).length ? c.waits_on.map(w => `<span class="pill warn">Waits on ${esc(w)}</span>`).join("") : `<span class="pill plain">Waiting party not named</span>`}
+      ${c.devops ? `<span class="pill acc">${esc(c.devops.label)}</span>` : ""}</div>
+      <div class="sub">${c.status ? esc(ago(c.status.age_h)) + ": " + esc(c.status.text) : "No status note yet"}</div></li>`).join("");
+
+  const simple = list => list.map(c => `
+    <li><div class="line1"><span class="client">${esc(c.client)}</span><span class="title">${cardLink(c.short, c.title)}</span>
+      ${c.age_h != null ? `<span class="mono muted">${esc(ago(c.age_h))}</span>` : ""}</div>
+      ${c.status ? `<div class="sub">${esc(c.status.text)}</div>` : ""}</li>`).join("");
+
+  const deploys = (s.deployments || []).map(d => `
+    <tr class="${d.age_h > 168 ? "stale" : ""}">
+      <td><span class="client">${esc(d.client)}</span><br>${cardLink(d.short, d.title)}</td>
+      <td class="stage">${rail(d, true)}<div class="note">${esc(d.label)}</div></td>
+      <td class="mono">${esc(ago(d.age_h))}${d.age_h > 168 ? "<br>idle" : ""}</td>
+      <td>${d.items_card ? cardLink(d.items_card) : `<span class="muted">none</span>`}</td>
+    </tr>`).join("");
+
+  const replies = (s.needs_reply || []).length ? `<ul class="rows">${s.needs_reply.map(r => `
+    <li><div class="line1"><span class="title">${esc(r.from)}</span>
+      <span class="pill ${(r.age_h || 0) > 24 ? "crit" : "plain"}">${esc(ago(r.age_h))}</span></div>
+      <div class="sub">${esc(r.subject)}${r.note ? " &middot; " + esc(r.note) : ""}</div></li>`).join("")}</ul>`
+    : `<div class="empty">No email is waiting on Nat's reply.</div>`;
+
+  const meetings = !s.meetings_known ? `<div class="empty">Today's calendar has not been read yet.</div>`
+    : (s.meetings || []).length ? `<ul class="rows">${s.meetings.map(m => `
+    <li><div class="line1"><span class="mono">${esc(m.start)}${m.end ? " to " + esc(m.end) : ""}</span>
+      <span class="title">${esc(m.title)}</span>
+      ${m.status && m.status !== "accepted" ? `<span class="pill plain">${esc(m.status)}</span>` : ""}
+      ${m.card ? cardLink(m.card) : ""}</div>
+      ${(m.attendees || []).length ? `<div class="sub">${esc(m.attendees.join(", "))}</div>` : ""}</li>`).join("")}</ul>`
+    : `<div class="empty">No meetings today.</div>`;
+
+  const sched = (s.scheduled || []).length ? `<ul class="rows">${s.scheduled.map(c => `
+    <li><div class="line1"><span class="mono">${esc(c.when)}</span></div><div class="sub">${esc(c.title)}</div></li>`).join("")}</ul>`
+    : `<div class="empty">No scheduled checks.</div>`;
+
+  const watches = (s.watches || []).length ? `<ul class="rows">${s.watches.map(w => `
+    <li><div class="line1"><span class="pill acc">${esc(w.session)}</span>${w.card ? cardLink(w.card) : ""}</div>
+      <div class="sub">${esc(w.watch)}</div></li>`).join("")}</ul>` : `<div class="empty">No threads watched.</div>`;
+
+  const pr = s.prioritized || {count: 0, top: []};
+  const prio = `<ul class="rows">${pr.top.map(c => `<li><div class="line1"><span class="client">${esc(c.client)}</span>
+    <span class="title">${cardLink(c.short, c.title)}</span></div></li>`).join("")}</ul>`;
+
+  const el = document.getElementById("content");
+  el.innerHTML = `
+    <nav class="tally" aria-label="Summary">${tally}</nav>
+    <section id="actions"><h2>Actions for Nat <small>${A.length} open${p1 ? ", " + p1 + " urgent" : ""}</small></h2>${actions}${doneA}</section>
+    <section id="doing"><h2>Doing <small>${(s.doing || []).length} cards</small></h2>
+      ${doing ? `<div class="grid">${doing}</div>` : `<div class="empty">Doing is empty.</div>`}</section>
+    <section id="blocked"><h2>Blocked <small>${(s.blocked || []).length}</small></h2>
+      ${blocked ? `<ul class="rows">${blocked}</ul>` : `<div class="empty">Nothing is blocked.</div>`}</section>
+    <div class="two">
+      <section id="withclient"><h2>With client <small>${(s.with_client || []).length}</small></h2>
+        ${(s.with_client || []).length ? `<ul class="rows">${simple(s.with_client)}</ul>` : `<div class="empty">Nothing with clients.</div>`}</section>
+      <section id="done"><h2>Done, last 3 days <small>${(s.done_recent || []).length}</small></h2>
+        ${(s.done_recent || []).length ? `<ul class="rows">${simple(s.done_recent)}</ul>` : `<div class="empty">Nothing finished in the last 3 days.</div>`}</section>
+    </div>
+    <section id="deploys"><h2>Deployments in flight <small>${(s.deployments || []).length} on the Dev Ops board, not yet on prod</small></h2>
+      ${deploys ? `<div class="tbl-wrap"><table><thead><tr><th>Request</th><th>Stage</th><th>Last move</th><th>Items card</th></tr></thead><tbody>${deploys}</tbody></table></div>`
+        : `<div class="empty">No deployments in flight.</div>`}
+      <p class="note">Rail runs Requested, staging request, staging approved, deploying, on staging, prod request, prod approved, deploying to prod. Greyed rows have not moved in 7 days.</p></section>
+    <div class="two">
+      <section id="replies"><h2>Replies owed</h2>${replies}</section>
+      <section id="meetings"><h2>Today's meetings</h2>${meetings}</section>
+    </div>
+    <div class="two">
+      <section id="scheduled"><h2>Scheduled checks</h2>${sched}</section>
+      <section id="watches"><h2>Thread watches</h2>${watches}</section>
+    </div>
+    <section id="prioritized"><h2>Up next in Prioritized <small>top ${pr.top.length} of ${pr.count}</small></h2>${prio}</section>`;
+  el.hidden = false;
+  document.getElementById("boot").hidden = true;
+  if (location.hash && !render.jumped) { render.jumped = true; document.querySelector(location.hash)?.scrollIntoView(); }
+}
+
+let latest = null;
+setInterval(() => { if (latest) render(latest); }, 60000); // keep the "x min ago" labels honest
+
+(async () => {
+  const db = window.claude?.use ? await window.claude.use("db") : null;
+  if (!db) {
+    document.getElementById("fresh").innerHTML = `<span class="pill crit">Snapshot unavailable in this view</span>`;
+    document.querySelector("#boot p").textContent = "This view cannot read the dashboard data. Open the page signed in to claude.ai as its owner.";
+    return;
+  }
+  db.doc("dash/snapshot").onSnapshot(snap => {
+    if (!snap.exists) return;
+    latest = snap.data();
+    render(latest);
+  }, err => {
+    document.getElementById("fresh").innerHTML = `<span class="pill crit">Live updates stopped (${esc(err.code)}). Reload the page.</span>`;
+  });
+})();
+</script>
