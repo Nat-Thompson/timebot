@@ -100,6 +100,7 @@ section > h2 small { font: 500 13px var(--mono); color: var(--muted); letter-spa
 .rows .line1 { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline }
 .rows .title { font-weight: 600; overflow-wrap: anywhere }
 .rows .sub { font-size: 13.5px; color: var(--muted); overflow-wrap: anywhere }
+.rows .blocker { font-size: 14px; overflow-wrap: anywhere; padding-left: 10px; border-left: 3px solid var(--warn) }
 .empty { padding: 14px; color: var(--muted); font-style: italic; background: var(--surface); border: 1px dashed var(--line); border-radius: 8px }
 
 .two { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 28px }
@@ -216,8 +217,11 @@ function render(s) {
 
   const blocked = (s.blocked || []).map(c => `
     <li><div class="line1"><span class="client">${esc(c.client)}</span><span class="title">${cardLink(c.short, c.title)}</span>
-      ${(c.waits_on || []).length ? c.waits_on.map(w => `<span class="pill warn">Waits on ${esc(w)}</span>`).join("") : `<span class="pill plain">Waiting party not named</span>`}
+      ${!(c.waits_on || []).length ? `<span class="pill plain">Waiting party not named</span>`
+        : c.waits_guess ? c.waits_on.map(w => `<span class="pill plain" title="Guessed from the latest note">Maybe ${esc(w)}?</span>`).join("")
+        : `<span class="pill warn">Waits on ${esc(c.waits_on[0])}${c.waits_age_h != null ? " &middot; " + esc(ago(c.waits_age_h).replace(" ago", "")) : ""}</span>`}
       ${c.devops ? `<span class="pill acc">${esc(c.devops.label)}</span>` : ""}</div>
+      ${c.blocker ? `<div class="blocker">${esc(c.blocker)}</div>` : ""}
       <div class="sub">${c.status ? esc(ago(c.status.age_h)) + ": " + esc(c.status.text) : "No status note yet"}</div></li>`).join("");
 
   const simple = list => list.map(c => `

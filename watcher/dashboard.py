@@ -163,11 +163,26 @@ def build():
             "generated_ct": NOW.astimezone(CT).strftime("%a %b %d, %I:%M %p CT").replace(" 0", " "),
             "today": TODAY}
     snap["doing"] = [card_detail(c, devops) for c in lists["doing"]]
+    # state/blocked_waits.json (kept by WATCHER) says who each Blocked card waits on. Cards without
+    # an entry fall back to names found in the latest note, flagged as a guess on the page.
+    bw_path = os.path.join(STATE, "blocked_waits.json")
+    waits = json.load(open(bw_path, encoding="utf-8")) if os.path.exists(bw_path) else {}
     snap["blocked"] = []
     for c in lists["blocked"]:
         d = card_detail(c, devops)
-        d["waits_on"] = waits_on((d["status"] or {}).get("text", "") + " " + (c.get("desc") or "")[:600])
+        w = waits.get(c["shortLink"])
+        if w and w.get("waiting_on"):
+            d["waits_on"] = [w["waiting_on"]]
+            d["blocker"] = status_line(w.get("blocker", ""), 240)
+            d["waits_age_h"] = ct_age_h(w.get("since", ""))
+            d["waits_guess"] = False
+        else:
+            d["waits_on"] = waits_on((d["status"] or {}).get("text", "") + " " + (c.get("desc") or "")[:600])
+            d["waits_guess"] = True
         snap["blocked"].append(d)
+    blocked_now = {c["shortLink"] for c in lists["blocked"]}
+    snap["_waits_unset"] = sorted(blocked_now - set(waits))
+    snap["_waits_stale"] = sorted(set(waits) - blocked_now)
     snap["with_client"] = [card_detail(c, devops) for c in lists["withclient"]]
     week_ago = (NOW - timedelta(days=3)).isoformat()
     recent_done = sorted([c for c in lists["done"] if c["dateLastActivity"] >= week_ago],
@@ -215,6 +230,7 @@ def build():
 
 if __name__ == "__main__":
     snap = build()
+    unset, stale = snap.pop("_waits_unset"), snap.pop("_waits_stale")
     # Card titles sometimes carry em dashes; the page never shows one (Nat's writing rule).
     body = json.dumps(snap, ensure_ascii=False, indent=1).replace(" — ", " - ").replace("—", " - ")
     assert len(body.encode("utf-8")) < 200_000, "snapshot too big for one db document"
@@ -225,3 +241,7 @@ if __name__ == "__main__":
     print(f"OK {OUT} | {len(body)} bytes | {snap['generated_ct']} | actions {len(snap['actions'])} | "
           f"doing {len(snap['doing'])} | blocked {len(snap['blocked'])} | with client {len(snap['with_client'])} | "
           f"deploys {len(snap['deployments'])} | needs reply {len(snap['needs_reply'])}")
+    if unset:
+        print("BLOCKED, NO waiting_on in state/blocked_waits.json:", " ".join(unset))
+    if stale:
+        print("blocked_waits.json entries for cards no longer Blocked (remove them):", " ".join(stale))
