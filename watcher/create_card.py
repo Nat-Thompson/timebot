@@ -2,14 +2,16 @@
 
 Usage: python create_card.py <spec.json>
 spec: {"list": "prioritized", "label": "operations", "name": "[CLIENT] title", "desc": "..."}
-list and label take aliases from _trello.py or raw ids. Never put passwords or secrets in desc.
+list and label take aliases from _trello.py or raw ids ("devops-staging-request" is the Dev Ops
+board's Deploy To Staging Request list). Never put passwords or secrets in desc.
 """
 import json
 import sys
-from _trello import LABELS, LISTS, call, resolve
+from _trello import DEVOPS_LISTS, LABELS, LISTS, call, resolve
 
 spec = json.load(open(sys.argv[1], encoding="utf-8"))
-body = {"idList": resolve(spec["list"], LISTS), "name": spec["name"], "desc": spec.get("desc", ""), "pos": "top"}
+body = {"idList": resolve(spec["list"], {**LISTS, **DEVOPS_LISTS}), "name": spec["name"],
+        "desc": spec.get("desc", ""), "pos": "top"}
 if spec.get("label"):
     body["idLabels"] = resolve(spec["label"], LABELS)
 c = call("POST", "cards", body)

@@ -3,26 +3,43 @@
 Credentials come from timebot/.env (TRELLO_API_KEY, TRELLO_API_TOKEN). The token is never printed.
 All writes send a JSON body via urllib (never curl, never query-string text), so UTF-8 and line
 breaks survive; see ALEXANDRIA tempo.md for why.
+
+Environment overrides (set by bg/runner.py):
+  WATCHER_STATE    state directory (default: watcher/state)
+  TIMEBOT_ENV      path to the .env file (default: timebot/.env)
+  WATCHER_DRY_RUN  "1" = no Trello writes: call() prints WOULD and raises DryRun instead
 """
 import json
 import os
 import re
 import sys
+import tempfile
 import urllib.request
 
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-STATE = os.path.join(HERE, "state")
+STATE = os.environ.get("WATCHER_STATE") or os.path.join(HERE, "state")
 os.makedirs(STATE, exist_ok=True)
+DRY = os.environ.get("WATCHER_DRY_RUN") == "1" or "--dry-run" in sys.argv
 
-_env = {}
-with open(os.path.join(HERE, "..", ".env"), encoding="utf-8") as f:
-    for line in f:
-        line = line.strip()
-        if line and not line.startswith("#") and "=" in line:
-            k, v = line.split("=", 1)
-            _env[k.strip()] = v.strip().strip('"').strip("'")
+
+class DryRun(Exception):
+    """Raised by call() in dry-run mode, after printing what it would have sent."""
+
+
+def load_env():
+    env = {}
+    with open(os.environ.get("TIMEBOT_ENV") or os.path.join(HERE, "..", ".env"), encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                k, v = line.split("=", 1)
+                env[k.strip()] = v.strip().strip('"').strip("'")
+    return env
+
+
+_env = load_env()
 AUTH = f"key={_env['TRELLO_API_KEY']}&token={_env['TRELLO_API_TOKEN']}"
 
 # Savvy Otter Items board (mdS3ny24)
@@ -45,6 +62,18 @@ LABELS = {
 }
 # Savvy Otter Dev Ops board
 DEVOPS = "5cIqQD15"
+DEVOPS_LISTS = {"devops-staging-request": "6a19aa90a44b0bb583441ff9"}  # Deploy To Staging Request
+
+
+def _dry_hook(kind, value, tb):
+    """In dry-run mode a write script ends at its first write: report it and exit cleanly."""
+    if kind is DryRun:
+        print("DRY RUN: nothing written")
+        sys.exit(0)
+    sys.__excepthook__(kind, value, tb)
+
+
+sys.excepthook = _dry_hook
 
 
 def resolve(value, table):
@@ -59,6 +88,9 @@ def get(path):
 
 
 def call(method, path, body=None):
+    if DRY:
+        print("WOULD", method, path.split("?")[0], json.dumps(body, ensure_ascii=False)[:300] if body else "")
+        raise DryRun(f"{method} {path.split('?')[0]}")
     sep = "&" if "?" in path else "?"
     req = urllib.request.Request(
         f"https://api.trello.com/1/{path}{sep}{AUTH}",
@@ -71,6 +103,21 @@ def call(method, path, body=None):
 def assert_clean(text, expected):
     assert text == expected, "stored text differs from what was sent"
     assert not re.search(r"%[0-9A-Fa-f]{2}", text), "percent-encoding survived"
+
+
+def save_json(path, data):
+    """Atomic write: temp file in the same directory, then replace."""
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path), suffix=".tmp")
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False)
+    os.replace(tmp, path)
+
+
+def save_text(path, text):
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path), suffix=".tmp")
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(text)
+    os.replace(tmp, path)
 
 
 def items_cards():
