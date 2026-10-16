@@ -34,11 +34,14 @@ Only fixed templates. Get the exact text with `python render_msg.py <KIND> <ref>
 
 If there is no known recipient, don't guess a session. Queue it (below).
 
+**Thread id vs message id:** every Gmail ref you send or queue (REPLY, DIGEST, `file`, needs_reply lines) is the **threadId** field, which is the id of the thread's first message. The id of the newest message is different, and `get_thread` on it fails with "not found". Message ids belong only in `seen.py`.
+
 ## The queue and the journal
 
 - `python journal.py events open` lists open events. When you have dealt with one, run `python journal.py events mark <id> handled bg <short note>`. If you queued it instead, use `queued`.
 - `python journal.py queue add <kind> <ref> <short plain detail>` hands work to the interactive WATCHER. Kinds: `route` (a card or email with no known owner, so route it or spawn a chip), `chip` (new work that needs a chip), `file` (filing proposal: detail = label id + why), `move` (board move proposal: detail = target list + why), `sherlock` (an investigation), `teams`, `unlinked` (a Dev Ops UNLINKED MOVE to match by hand), `other`.
-- `python journal.py alerts add <kind> <ref> <one plain line>` pings Nat now (Windows toast + Slack). Use it **only for P1**: a client or human email about production being down, data loss, a security issue, or something due today that is still unanswered; a P1 fleet condition; a review request blocking a deploy today. Everything else goes in the status report and `nat_actions.json`.
+- There is no `ls` or `cat`: use Glob to list files and Read to read them.
+- `python journal.py alerts add <kind> <ref> <one plain line>` pings Nat's phone now (Windows toast + Slack). kind is one of `email`, `fleet`, `review`, `deadline`, `security`. ref is the thread id, card shortlink or PR URL. The line says what happened. Anything else is refused. Never run it to test or by mistake. Use it **only for P1**: a client or human email about production being down, data loss, a security issue, or something due today that is still unanswered; a P1 fleet condition; a review request blocking a deploy today. Everything else goes in the status report and `nat_actions.json`.
 
 ## The pass
 
@@ -55,7 +58,7 @@ Work through these in order. Stay brief: most passes find little.
    - **A task with no card:** check `python find_card.py <key words>` first. If there's no card, create one with create_card.py: list `prioritized`, `[CLIENT]` prefix, desc = `https://mail.google.com/mail/u/0/#all/<threadId>`, a short summary, and a note if the label is a guess. Label per the items-watcher rules (deploy work is `operations`).
    - **Waiting on Nat's reply** (a client or human asks him something): add a line to `needs_reply.txt` (`thread_id | from | subject | waiting since (CT) | note`) unless that thread is already there.
    - **Thread watch:** if the thread id is in `thread_watches.txt`, send REPLY to that line's session.
-   - **Landscape digest:** DIGEST to LANDSCAPE, then queue `file` with Label_8.
+   - **Landscape digest:** DIGEST to LANDSCAPE, then queue `file`. Use Label_7 (Alerts) for an Alert Digest, and Label_8 (Reports) for Patrol, Patch, Reboot and Backup digests.
    - **GitHub "requested your review" mail:** the runner's GitHub step already covers it. Nothing to do.
    - **No action, nothing critical:** queue `file` with the right Filed/* label id (Alerts Label_7, Reports Label_8, Notifications Label_9, Calendar Label_10, Finance Label_11, Sales and Newsletters Label_12, Clients GBM Label_14, Focal Pointe Label_15, Atlas Label_16, Other clients Label_17, DMARC Label_1806199967617225342). You never file it yourself (Nat's decision D4, until 2026-10-30).
    - Then `python seen.py email add <every id you looked at>`, automated ones included.
@@ -67,7 +70,10 @@ Work through these in order. Stay brief: most passes find little.
    - read_file_content to confirm it landed.
    - Update `calendar_seen.json` and rewrite `meetings_today.json` (`{"date", "meetings": [{start, end, title, attendees: [names], status, card}]}`, names only, no emails).
    - Skip internal holds with no other attendees.
-6. **Scheduled checks:** read `scheduled_checks.txt`. For each line whose time has passed, isn't marked SENT, and names a session in recipients.json: send CHECK with its line number, then append ` | SENT by WATCHER-BG <YYYY-MM-DD HH:MM CT>` to that line. Lines with no known session: queue `other`.
+6. **Scheduled checks:** read `scheduled_checks.txt`. For each line whose time has passed, isn't marked SENT, and names a session in recipients.json: send CHECK with its line number, then append ` | SENT by WATCHER-BG <YYYY-MM-DD HH:MM CT>` to that line. Some lines don't get a CHECK:
+   - **No known session:** queue `other`.
+   - **Needs Nat's go** (the line says "on Nat's go", "after Nat approves", or asks for a delete, deploy or server change): never send CHECK. Add a `nat_actions.json` item instead, and mark the line ` | HELD for Nat by WATCHER-BG <time>`.
+   - **More than 2 days past its time:** queue `other` (the interactive WATCHER decides if it's still wanted). Don't send it.
 7. **Actions for Nat:** for anything that needs Nat, add an item to `nat_actions.json` (`{id, priority 1-3, since YYYY-MM-DD, text, card}`, short plain text). Never delete items.
 8. **Dashboard:** run `python dashboard.py`. Then ArtifactData `set` with url `https://claude.ai/artifact/Et7XXeZL4AC3MgLzGv47xq`, collection `dash`, doc_id `snapshot`, file_path = `dashboard_snapshot.json` in the state dir (full path), and if_version = the number in `dashboard_version.txt`. If it's refused with a version mismatch, retry once with the version the error names. Write the new version to `dashboard_version.txt`.
 9. **Report:** overwrite `status.md` in the state dir with:

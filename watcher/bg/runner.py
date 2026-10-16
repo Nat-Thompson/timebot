@@ -86,12 +86,15 @@ class Pass:
         self.ct = self.t0.astimezone(CT)
         real_state = os.path.abspath(args.state_from or os.path.join(WATCHER, "state"))
         if self.dry:
-            self.state = os.path.join(WATCHER, "state", "dryrun", self.ct.strftime("%Y%m%d-%H%M%S"))
-            os.makedirs(self.state)
-            for f in os.listdir(real_state):
-                src = os.path.join(real_state, f)
-                if os.path.isfile(src) and f != "watcher.lock" and os.path.splitext(f)[1] in (".json", ".txt", ".md", ".jsonl"):
-                    shutil.copy2(src, self.state)
+            # --shadow NAME reuses one shadow across passes (a shadow week), so the background job keeps its
+            # own baselines and seen-sets instead of re-copying the interactive WATCHER's every time.
+            self.state = os.path.join(WATCHER, "state", "dryrun", args.shadow or self.ct.strftime("%Y%m%d-%H%M%S"))
+            if not os.path.isdir(self.state):
+                os.makedirs(self.state)
+                for f in os.listdir(real_state):
+                    src = os.path.join(real_state, f)
+                    if os.path.isfile(src) and f != "watcher.lock" and os.path.splitext(f)[1] in (".json", ".txt", ".md", ".jsonl"):
+                        shutil.copy2(src, self.state)
         else:
             self.state = real_state
         os.makedirs(os.path.join(self.state, "logs"), exist_ok=True)
@@ -352,6 +355,11 @@ Recent notes from earlier passes (bg_notes.md, last lines):
         import journal
         journal.STATE = self.state
         for a in journal.open_entries("alerts"):
+            why = journal.valid("alerts", a.get("kind"), a.get("ref"), a.get("detail"))
+            if why:  # written around the check (e.g. by hand): never push it
+                journal.mark("alerts", a["id"], "dropped", "bg-runner", why)
+                self.log(f"ALERT DROPPED {a['id']} | {why}")
+                continue
             self.push(f"{a.get('kind', 'P1')} {a.get('ref', '')}".strip(), self.scrub(a.get("detail", ""))[:300])
             journal.mark("alerts", a["id"], "done", "bg-runner", "pushed")
 
@@ -383,6 +391,8 @@ Recent notes from earlier passes (bg_notes.md, last lines):
             else:
                 self.status["claude"] = f"skipped: {why}"
             self.drain_alerts()
+            if self.dry and os.path.exists(self.path("dryrun_report.md")):  # one report file per pass
+                os.replace(self.path("dryrun_report.md"), self.path(f"dryrun_report-{self.ct:%Y%m%d-%H%M}.md"))
             self.failures()
             self.prune_logs()
         except Exception as e:  # log, count as a failure, never leave the lock behind
@@ -402,6 +412,7 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--state-from")
+    ap.add_argument("--shadow", help="dry run: reuse state/dryrun/<name> across passes")
     ap.add_argument("--force-claude", action="store_true")
     ap.add_argument("--no-claude", action="store_true")
     ap.add_argument("--model", default="sonnet")

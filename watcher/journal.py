@@ -23,6 +23,22 @@ from _trello import STATE
 
 FILES = {"events": "events.jsonl", "queue": "queue.jsonl", "alerts": "alerts.jsonl"}
 OPEN = {"new"}
+# An alert pings Nat's phone, so it must name a real P1 kind and say something (a 2026-10-16 dry run
+# produced `alerts add none none none`; this check makes that impossible).
+ALERT_KINDS = {"email", "fleet", "review", "deadline", "security"}
+EMPTY = {"", "none", "null", "n/a", "na", "-", "x", "?"}
+
+
+def valid(name, kind, ref, detail):
+    """None if the entry is acceptable, else the reason it is not."""
+    if any(str(v).strip().lower() in EMPTY for v in (kind, ref, detail)):
+        return "kind, ref and detail must all be real values"
+    if name == "alerts":
+        if kind not in ALERT_KINDS:
+            return f"alert kind must be one of {sorted(ALERT_KINDS)}"
+        if len(str(detail).strip()) < 15:
+            return "alert detail must say what happened in a plain line"
+    return None
 
 
 def path(name):
@@ -57,6 +73,9 @@ def open_entries(name):
 
 def add(name, kind, ref, detail, by="bg", dedupe=True):
     """Add an entry. With dedupe, an open entry with the same kind+ref is reused, not repeated."""
+    why = valid(name, kind, ref, detail)
+    if why:
+        raise ValueError(why)
     if dedupe:
         for e in open_entries(name):
             if e.get("kind") == kind and e.get("ref") == ref:
@@ -81,8 +100,13 @@ if __name__ == "__main__":
         for e in open_entries(name):
             print(json.dumps(e, ensure_ascii=False))
     elif cmd == "add":
-        print("ADDED", add(name, sys.argv[3], sys.argv[4], " ".join(sys.argv[5:]),
-                           by=os.environ.get("WATCHER_HOLDER", "interactive")))
+        if len(sys.argv) < 6:
+            sys.exit("REFUSED: add needs <kind> <ref> <detail...>")
+        try:
+            print("ADDED", add(name, sys.argv[3], sys.argv[4], " ".join(sys.argv[5:]),
+                               by=os.environ.get("WATCHER_HOLDER", "interactive")))
+        except ValueError as e:
+            sys.exit(f"REFUSED: {e}")
     elif cmd == "mark":
         mark(name, sys.argv[3], sys.argv[4], sys.argv[5], " ".join(sys.argv[6:]))
         print("MARKED", sys.argv[3], sys.argv[4])
