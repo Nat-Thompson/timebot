@@ -16,7 +16,8 @@ import sys
 import tempfile
 import urllib.request
 
-sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if sys.stdout:  # None under pythonw (Task Scheduler runs the background WATCHER that way)
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 STATE = os.environ.get("WATCHER_STATE") or os.path.join(HERE, "state")

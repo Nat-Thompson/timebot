@@ -1,5 +1,5 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<!-- Background WATCHER (ALEXANDRIA clients/savvyotter/projects/watcher-background-service.md).
+<!-- No <?xml encoding?> declaration on purpose: Register-ScheduledTask -Xml rejects "UTF-8" in a string.
+     Background WATCHER (ALEXANDRIA clients/savvyotter/projects/watcher-background-service.md).
      Install (B5, with Nat watching), from PowerShell as Nat, NOT elevated:
        Register-ScheduledTask -TaskName 'WATCHER-bg' -Xml (Get-Content -Raw C:\git\savvyotter\timebot\watcher\bg\WATCHER-bg.xml)
      Stop:   Disable-ScheduledTask -TaskName 'WATCHER-bg'      Remove: Unregister-ScheduledTask -TaskName 'WATCHER-bg'

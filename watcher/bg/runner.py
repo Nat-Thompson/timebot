@@ -70,6 +70,7 @@ DENY = ([f"mcp__claude_ai_Gmail__{t}" for t in (
 
 PER_RUN_USD = 3.0     # API-equivalent estimate per Claude run (subscription, not billed); --max-budget-usd
 DAILY_USD = 40.0      # stop Tier B for the day past this; override with WATCHER_BG_DAILY_USD in .env
+INTERACTIVE_OWNED = ("recipients.json", "card_owners.json", "thread_watches.txt", "blocked_waits.json")
 STEP_TIMEOUT = 180
 CLAUDE_TIMEOUT = 12 * 60
 
@@ -95,11 +96,16 @@ class Pass:
                     src = os.path.join(real_state, f)
                     if os.path.isfile(src) and f != "watcher.lock" and os.path.splitext(f)[1] in (".json", ".txt", ".md", ".jsonl"):
                         shutil.copy2(src, self.state)
+            elif args.shadow:
+                # Files only the interactive WATCHER writes: keep a long-lived shadow current with them.
+                for f in INTERACTIVE_OWNED:
+                    if os.path.isfile(os.path.join(real_state, f)):
+                        shutil.copy2(os.path.join(real_state, f), self.state)
         else:
             self.state = real_state
         os.makedirs(os.path.join(self.state, "logs"), exist_ok=True)
         self.logf = os.path.join(self.state, "logs", f"runner-{self.ct:%Y-%m-%d}.log")
-        self.env_file = os.environ.get("TIMEBOT_ENV") or os.path.join(REPO, ".env")
+        self.env_file = args.env or os.environ.get("TIMEBOT_ENV") or os.path.join(REPO, ".env")
         self.env = {**os.environ, "WATCHER_DIR": WATCHER, "WATCHER_STATE": self.state, "WATCHER_HOLDER": "bg",
                     "TIMEBOT_ENV": self.env_file, "ALEXANDRIA_DIR": r"C:\minions\SavvyAI\ALEXANDRIA",
                     "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"}
@@ -413,7 +419,16 @@ if __name__ == "__main__":
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--state-from")
     ap.add_argument("--shadow", help="dry run: reuse state/dryrun/<name> across passes")
+    ap.add_argument("--env", help="path to timebot/.env (default: next to the repo, or TIMEBOT_ENV)")
     ap.add_argument("--force-claude", action="store_true")
     ap.add_argument("--no-claude", action="store_true")
     ap.add_argument("--model", default="sonnet")
-    sys.exit(Pass(ap.parse_args()).go())
+    try:
+        p = Pass(ap.parse_args())
+    except Exception as e:  # before the pass log exists (pythonw has no console): leave a trace
+        import traceback
+        os.makedirs(os.path.join(WATCHER, "state", "logs"), exist_ok=True)
+        with open(os.path.join(WATCHER, "state", "logs", "runner-startup-errors.log"), "a", encoding="utf-8") as f:
+            f.write(f"{datetime.now(CT):%Y-%m-%d %H:%M:%S} {type(e).__name__}: {e}\n{traceback.format_exc()[-1500:]}\n")
+        sys.exit(2)
+    sys.exit(p.go())

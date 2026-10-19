@@ -51,6 +51,8 @@ def record(kind, ref, detail):
     print(kind.upper(), ref, "|", detail)
     if RECORD:
         add("events", kind, ref, detail, by=BY)
+        if kind != "pr_review_carded" or DRY:
+            seen.setdefault(ref, {})["reported"] = kind
 
 
 prs = gh("search", "prs", "--review-requested=Nat-Thompson", "--state=open", "--owner", "SavvyOtterInc",
@@ -73,6 +75,9 @@ for pr in prs:
     if url in on_card:
         print("ON CARD", url, "->", on_card[url])
         seen.setdefault(url, {})["card"] = on_card[url]
+        continue
+    if seen.get(url, {}).get("reported"):  # bot, draft, unknown-repo or dry-run PRs: report once, not every pass
+        print("ALREADY REPORTED", url, "|", seen[url]["reported"])
         continue
     if pr["author"].get("is_bot") or author.endswith("[bot]") or author.startswith("app/"):
         record("pr_review_bot", url, f"{repo} #{num} by {author} | {pr['title'][:120]}")
@@ -99,6 +104,6 @@ for pr in prs:
     seen[url] = {"card": made["shortLink"], "created": opened}
     record("pr_review_carded", url, f"dev ops {made['shortLink']} | {name}")
 
-if not DRY:
+if RECORD:  # real runs, and dry runs against the runner's shadow state
     save_json(SEEN, seen)
 print("review requests:", len(prs))

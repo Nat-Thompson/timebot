@@ -119,7 +119,7 @@ for c in moved:
     if RECORD:
         add("events", "devops_move", c["shortLink"], f"{frm} -> {to} | items {','.join(m['shortLink'] for m in ms)} | {c['name']}", by=BY)
 
-if not DRY:
+if RECORD:  # real runs, and dry runs against the runner's shadow state
     save_json(SEEN, sorted(seen))
     save_json(POSITIONS, {c["shortLink"]: c["idList"] for c in cards})
 print("new:", len(new), "moved:", len(moved))
