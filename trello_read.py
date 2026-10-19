@@ -20,7 +20,7 @@ import urllib.request
 
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-ENV_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+ENV_PATH = os.environ.get("TIMEBOT_ENV") or os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
 env = {}
 with open(ENV_PATH, encoding="utf-8") as f:
     for line in f:

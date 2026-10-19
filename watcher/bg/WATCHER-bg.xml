@@ -1,0 +1,71 @@
+<!-- No <?xml encoding?> declaration on purpose: Register-ScheduledTask -Xml rejects "UTF-8" in a string.
+     Background WATCHER (ALEXANDRIA clients/savvyotter/projects/watcher-background-service.md).
+     Install (B5, with Nat watching), from PowerShell as Nat, NOT elevated:
+       Register-ScheduledTask -TaskName 'WATCHER-bg' -Xml (Get-Content -Raw C:\git\savvyotter\timebot\watcher\bg\WATCHER-bg.xml)
+     Stop:   Disable-ScheduledTask -TaskName 'WATCHER-bg'      Remove: Unregister-ScheduledTask -TaskName 'WATCHER-bg'
+     Runs as the logged-on user (Nat), limited rights, only while he is logged on (a locked screen counts).
+     Every 15 min 7 AM-7 PM on weekdays plus hourly around the clock; the runner's own gate paces Claude.
+     Wakes the laptop to run; on battery Windows' "Allow wake timers" power setting decides. -->
+<Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo>
+    <Description>Background WATCHER pass: Trello and Dev Ops sync, GitHub review requests, inbox and calendar triage via headless Claude (read and route only), dashboard refresh. Repo: C:\git\savvyotter\timebot\watcher\bg.</Description>
+    <URI>\WATCHER-bg</URI>
+  </RegistrationInfo>
+  <Triggers>
+    <CalendarTrigger>
+      <StartBoundary>2026-10-19T07:00:00</StartBoundary>
+      <Repetition>
+        <Interval>PT15M</Interval>
+        <Duration>PT12H</Duration>
+        <StopAtDurationEnd>false</StopAtDurationEnd>
+      </Repetition>
+      <ScheduleByWeek>
+        <DaysOfWeek><Monday /><Tuesday /><Wednesday /><Thursday /><Friday /></DaysOfWeek>
+        <WeeksInterval>1</WeeksInterval>
+      </ScheduleByWeek>
+    </CalendarTrigger>
+    <CalendarTrigger>
+      <StartBoundary>2026-10-19T00:05:00</StartBoundary>
+      <Repetition>
+        <Interval>PT1H</Interval>
+        <Duration>P1D</Duration>
+        <StopAtDurationEnd>false</StopAtDurationEnd>
+      </Repetition>
+      <ScheduleByDay>
+        <DaysInterval>1</DaysInterval>
+      </ScheduleByDay>
+    </CalendarTrigger>
+  </Triggers>
+  <Principals>
+    <Principal id="Author">
+      <LogonType>InteractiveToken</LogonType>
+      <RunLevel>LeastPrivilege</RunLevel>
+    </Principal>
+  </Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <AllowHardTerminate>true</AllowHardTerminate>
+    <StartWhenAvailable>true</StartWhenAvailable>
+    <RunOnlyIfNetworkAvailable>true</RunOnlyIfNetworkAvailable>
+    <IdleSettings>
+      <StopOnIdleEnd>false</StopOnIdleEnd>
+      <RestartOnIdle>false</RestartOnIdle>
+    </IdleSettings>
+    <AllowStartOnDemand>true</AllowStartOnDemand>
+    <Enabled>true</Enabled>
+    <Hidden>false</Hidden>
+    <RunOnlyIfIdle>false</RunOnlyIfIdle>
+    <WakeToRun>true</WakeToRun>
+    <ExecutionTimeLimit>PT15M</ExecutionTimeLimit>
+    <Priority>7</Priority>
+  </Settings>
+  <Actions Context="Author">
+    <Exec>
+      <Command>C:\Python314\pythonw.exe</Command>
+      <Arguments>C:\git\savvyotter\timebot\watcher\bg\runner.py</Arguments>
+      <WorkingDirectory>C:\git\savvyotter\timebot\watcher</WorkingDirectory>
+    </Exec>
+  </Actions>
+</Task>

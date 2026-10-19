@@ -20,11 +20,15 @@ import json
 import os
 import re
 import sys
-from _trello import DEVOPS, LABELS, LISTS, STATE, call, get, items_cards
+from _trello import DEVOPS, LABELS, LISTS, STATE, call, get, items_cards, save_json
+from journal import add
 
 SEEN = os.path.join(STATE, "devops_seen.json")
 POSITIONS = os.path.join(STATE, "devops_lists.json")
-DRY = "--dry-run" in sys.argv
+DRY = "--dry-run" in sys.argv or os.environ.get("WATCHER_DRY_RUN") == "1"
+BY = os.environ.get("WATCHER_HOLDER", "interactive")
+# Events are recorded on real runs, and on dry runs against the runner's shadow copy of state.
+RECORD = not DRY or os.environ.get("WATCHER_SHADOW") == "1"
 
 CLIENTS = {  # Dev Ops prefix (lowercased, letters only) -> Items prefix
     "downtoearth": "DOWNTOEARTH", "dte": "DOWNTOEARTH", "flowerpower": "SCOTTBYRON",
@@ -51,8 +55,8 @@ cards = get(f"boards/{DEVOPS}/cards?fields=name,shortLink,shortUrl,idList")
 lists = {l["id"]: l["name"] for l in get(f"boards/{DEVOPS}/lists?fields=name")}
 devops_done = next(i for i, n in lists.items() if n.strip().lower() == "done")
 if "--baseline" in sys.argv:
-    json.dump(sorted(c["shortLink"] for c in cards), open(SEEN, "w"))
-    json.dump({c["shortLink"]: c["idList"] for c in cards}, open(POSITIONS, "w"))
+    save_json(SEEN, sorted(c["shortLink"] for c in cards))
+    save_json(POSITIONS, {c["shortLink"]: c["idList"] for c in cards})
     print("baseline:", len(cards), "Dev Ops cards marked seen, positions recorded")
     sys.exit()
 if not (os.path.exists(SEEN) and os.path.exists(POSITIONS)):
@@ -78,11 +82,15 @@ for c in new:
                 f"(list: {lists.get(c['idList'], '?')}). Label is Operations per Nat's deploy-hours rule.")
         if DRY:
             print("WOULD CREATE", c["shortLink"], "->", name, flag)
+            if RECORD:
+                add("events", "devops_new", c["shortLink"], f"{lists.get(c['idList'], '?')} | items (dry run) | {name}{flag}", by=BY)
         else:
             made = call("POST", "cards", {"idList": LISTS["prioritized"], "idLabels": LABELS["operations"],
                                           "name": name, "desc": desc, "pos": "top"})
             assert made["name"] == name and made["desc"] == desc
             print("CREATED", made["shortLink"], "<-", c["shortLink"], "|", name, flag)
+            add("events", "devops_new", c["shortLink"],
+                f"{lists.get(c['idList'], '?')} | items {made['shortLink']} | {name}{flag}", by=BY)
     seen.add(c["shortLink"])
 
 moved = [c for c in cards if c["shortLink"] in positions and positions[c["shortLink"]] != c["idList"]]
@@ -94,6 +102,8 @@ for c in moved:
     ms = mirrors_of(c["shortLink"])
     if not ms:
         print("UNLINKED MOVE (match by hand)", c["shortLink"], c["name"], "|", frm, "->", to)
+        if RECORD:
+            add("events", "devops_unlinked_move", c["shortLink"], f"{frm} -> {to} | {c['name']}", by=BY)
         continue
     for m in ms:
         if m["idList"] == LISTS["doing"]:
@@ -106,8 +116,10 @@ for c in moved:
             r = call("PUT", f"cards/{m['shortLink']}", {"idList": LISTS["doing"], "pos": "top"})
             assert r["idList"] == LISTS["doing"]
             print("MOVED TO DOING", m["shortLink"], m["name"], "| dev ops", frm, "->", to)
+    if RECORD:
+        add("events", "devops_move", c["shortLink"], f"{frm} -> {to} | items {','.join(m['shortLink'] for m in ms)} | {c['name']}", by=BY)
 
-if not DRY:
-    json.dump(sorted(seen), open(SEEN, "w"))
-    json.dump({c["shortLink"]: c["idList"] for c in cards}, open(POSITIONS, "w"))
+if RECORD:  # real runs, and dry runs against the runner's shadow state
+    save_json(SEEN, sorted(seen))
+    save_json(POSITIONS, {c["shortLink"]: c["idList"] for c in cards})
 print("new:", len(new), "moved:", len(moved))
