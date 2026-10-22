@@ -2,6 +2,7 @@
 
 Usage: python dashboard.py            # writes state/dashboard_snapshot.json, prints a summary
        python dashboard.py --print    # also dumps the JSON
+       python dashboard.py --dry-run  # builds and summarizes, writes nothing
 
 The page is a claude.ai Artifact whose shared database holds one document, dash/snapshot.
 After running this, WATCHER writes the file into that document with ArtifactData `set`
@@ -162,7 +163,9 @@ def build():
     snap = {"generated_at": NOW.isoformat(timespec="seconds"),
             "generated_ct": NOW.astimezone(CT).strftime("%a %b %d, %I:%M %p CT").replace(" 0", " "),
             "today": TODAY}
-    snap["doing"] = [card_detail(c, devops) for c in lists["doing"]]
+    # Doing and Done are split Client / Internal (2026-10-20); "column" is the list the card sits in.
+    snap["doing"] = [{**card_detail(c, devops), "column": col}
+                     for col in ("client", "internal") for c in lists[f"doing_{col}"]]
     # state/blocked_waits.json (kept by WATCHER) says who each Blocked card waits on. Cards without
     # an entry fall back to names found in the latest note, flagged as a guess on the page.
     bw_path = os.path.join(STATE, "blocked_waits.json")
@@ -185,10 +188,11 @@ def build():
     snap["_waits_stale"] = sorted(set(waits) - blocked_now)
     snap["with_client"] = [card_detail(c, devops) for c in lists["withclient"]]
     week_ago = (NOW - timedelta(days=3)).isoformat()
-    recent_done = sorted([c for c in lists["done"] if c["dateLastActivity"] >= week_ago],
+    recent_done = sorted([{**c, "column": col} for col in ("client", "internal") for c in lists[f"done_{col}"]
+                          if c["dateLastActivity"] >= week_ago],
                          key=lambda c: c["dateLastActivity"], reverse=True)[:8]
     snap["done_recent"] = [{"short": c["shortLink"], **dict(zip(("client", "title"), client_of(c["name"]))),
-                            "age_h": age_hours(c["dateLastActivity"])} for c in recent_done]
+                            "age_h": age_hours(c["dateLastActivity"]), "column": c["column"]} for c in recent_done]
     snap["prioritized"] = {"count": len(lists["prioritized"]),
                            "top": [{"short": c["shortLink"], **dict(zip(("client", "title"), client_of(c["name"])))}
                                    for c in lists["prioritized"][:8]]}
@@ -234,12 +238,15 @@ if __name__ == "__main__":
     # Card titles sometimes carry em dashes; the page never shows one (Nat's writing rule).
     body = json.dumps(snap, ensure_ascii=False, indent=1).replace(" — ", " - ").replace("—", " - ")
     assert len(body.encode("utf-8")) < 200_000, "snapshot too big for one db document"
-    with open(OUT, "w", encoding="utf-8") as f:
-        f.write(body)
+    if "--dry-run" in sys.argv:  # build and summarize only; state/dashboard_snapshot.json untouched
+        OUT = "(dry run, not written)"
+    else:
+        with open(OUT, "w", encoding="utf-8") as f:
+            f.write(body)
     if "--print" in sys.argv:
         print(body)
     print(f"OK {OUT} | {len(body)} bytes | {snap['generated_ct']} | actions {len(snap['actions'])} | "
-          f"doing {len(snap['doing'])} | blocked {len(snap['blocked'])} | with client {len(snap['with_client'])} | "
+          f"doing {len(snap['doing'])} ({sum(d['column'] == 'internal' for d in snap['doing'])} internal) | blocked {len(snap['blocked'])} | with client {len(snap['with_client'])} | "
           f"deploys {len(snap['deployments'])} | needs reply {len(snap['needs_reply'])}")
     if unset:
         print("BLOCKED, NO waiting_on in state/blocked_waits.json:", " ".join(unset))

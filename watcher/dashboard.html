@@ -206,9 +206,12 @@ function render(s) {
   const doneA = (s.actions_done || []).length ? `<div class="done-list">Done recently: ${s.actions_done.map(a =>
     `<s>${esc(a.text)}</s> (${esc(a.done)})`).join("; ")}</div>` : "";
 
+  // Doing and Done are split Client / Internal on the board (2026-10-20); internal cards get a pill.
+  const internal = c => c.column === "internal" ? `<span class="pill plain">Internal</span>` : "";
+  const doingInternal = (s.doing || []).filter(c => c.column === "internal").length;
   const doing = (s.doing || []).map(c => `
     <article class="card">
-      <div class="head"><span class="client">${esc(c.client)}</span><span class="mono muted">${esc(ago(c.age_h))}</span></div>
+      <div class="head"><span class="client">${esc(c.client)} ${internal(c)}</span><span class="mono muted">${esc(ago(c.age_h))}</span></div>
       <h3>${cardLink(c.short, c.title)}</h3>
       ${rail(c.devops)}
       ${status(c.status)}
@@ -226,7 +229,7 @@ function render(s) {
 
   const simple = list => list.map(c => `
     <li><div class="line1"><span class="client">${esc(c.client)}</span><span class="title">${cardLink(c.short, c.title)}</span>
-      ${c.age_h != null ? `<span class="mono muted">${esc(ago(c.age_h))}</span>` : ""}</div>
+      ${internal(c)}${c.age_h != null ? `<span class="mono muted">${esc(ago(c.age_h))}</span>` : ""}</div>
       ${c.status ? `<div class="sub">${esc(c.status.text)}</div>` : ""}</li>`).join("");
 
   const deploys = (s.deployments || []).map(d => `
@@ -268,7 +271,7 @@ function render(s) {
   el.innerHTML = `
     <nav class="tally" aria-label="Summary">${tally}</nav>
     <section id="actions"><h2>Actions for Nat <small>${A.length} open${p1 ? ", " + p1 + " urgent" : ""}</small></h2>${actions}${doneA}</section>
-    <section id="doing"><h2>Doing <small>${(s.doing || []).length} cards</small></h2>
+    <section id="doing"><h2>Doing <small>${(s.doing || []).length} cards, ${(s.doing || []).length - doingInternal} client, ${doingInternal} internal</small></h2>
       ${doing ? `<div class="grid">${doing}</div>` : `<div class="empty">Doing is empty.</div>`}</section>
     <section id="blocked"><h2>Blocked <small>${(s.blocked || []).length}</small></h2>
       ${blocked ? `<ul class="rows">${blocked}</ul>` : `<div class="empty">Nothing is blocked.</div>`}</section>
