@@ -170,9 +170,11 @@ def build():
     # an entry fall back to names found in the latest note, flagged as a guess on the page.
     bw_path = os.path.join(STATE, "blocked_waits.json")
     waits = json.load(open(bw_path, encoding="utf-8")) if os.path.exists(bw_path) else {}
+    # Blocked is split Client / Internal too (2026-10-23); the waits file stays keyed by shortlink.
+    blocked_cards = [{**c, "column": col} for col in ("client", "internal") for c in lists[f"blocked_{col}"]]
     snap["blocked"] = []
-    for c in lists["blocked"]:
-        d = card_detail(c, devops)
+    for c in blocked_cards:
+        d = {**card_detail(c, devops), "column": c["column"]}
         w = waits.get(c["shortLink"])
         if w and w.get("waiting_on"):
             d["waits_on"] = [w["waiting_on"]]
@@ -183,7 +185,7 @@ def build():
             d["waits_on"] = waits_on((d["status"] or {}).get("text", "") + " " + (c.get("desc") or "")[:600])
             d["waits_guess"] = True
         snap["blocked"].append(d)
-    blocked_now = {c["shortLink"] for c in lists["blocked"]}
+    blocked_now = {c["shortLink"] for c in blocked_cards}
     snap["_waits_unset"] = sorted(blocked_now - set(waits))
     snap["_waits_stale"] = sorted(set(waits) - blocked_now)
     snap["with_client"] = [card_detail(c, devops) for c in lists["withclient"]]
@@ -246,7 +248,7 @@ if __name__ == "__main__":
     if "--print" in sys.argv:
         print(body)
     print(f"OK {OUT} | {len(body)} bytes | {snap['generated_ct']} | actions {len(snap['actions'])} | "
-          f"doing {len(snap['doing'])} ({sum(d['column'] == 'internal' for d in snap['doing'])} internal) | blocked {len(snap['blocked'])} | with client {len(snap['with_client'])} | "
+          f"doing {len(snap['doing'])} ({sum(d['column'] == 'internal' for d in snap['doing'])} internal) | blocked {len(snap['blocked'])} ({sum(d['column'] == 'internal' for d in snap['blocked'])} internal) | with client {len(snap['with_client'])} | "
           f"deploys {len(snap['deployments'])} | needs reply {len(snap['needs_reply'])}")
     if unset:
         print("BLOCKED, NO waiting_on in state/blocked_waits.json:", " ".join(unset))

@@ -206,7 +206,8 @@ function render(s) {
   const doneA = (s.actions_done || []).length ? `<div class="done-list">Done recently: ${s.actions_done.map(a =>
     `<s>${esc(a.text)}</s> (${esc(a.done)})`).join("; ")}</div>` : "";
 
-  // Doing and Done are split Client / Internal on the board (2026-10-20); internal cards get a pill.
+  // Doing, Blocked and Done are split Client / Internal on the board (2026-10-20, Blocked 2026-10-23);
+  // internal cards get a pill.
   const internal = c => c.column === "internal" ? `<span class="pill plain">Internal</span>` : "";
   const doingInternal = (s.doing || []).filter(c => c.column === "internal").length;
   const doing = (s.doing || []).map(c => `
@@ -218,8 +219,10 @@ function render(s) {
       <div class="foot"><span>Today <b>${dur(c.minutes_today)}</b></span><span>Total <b>${dur(c.minutes_total)}</b></span></div>
     </article>`).join("");
 
+  const blockedInternal = (s.blocked || []).filter(c => c.column === "internal").length;
   const blocked = (s.blocked || []).map(c => `
     <li><div class="line1"><span class="client">${esc(c.client)}</span><span class="title">${cardLink(c.short, c.title)}</span>
+      ${internal(c)}
       ${!(c.waits_on || []).length ? `<span class="pill plain">Waiting party not named</span>`
         : c.waits_guess ? c.waits_on.map(w => `<span class="pill plain" title="Guessed from the latest note">Maybe ${esc(w)}?</span>`).join("")
         : `<span class="pill warn">Waits on ${esc(c.waits_on[0])}${c.waits_age_h != null ? " &middot; " + esc(ago(c.waits_age_h).replace(" ago", "")) : ""}</span>`}
@@ -273,7 +276,7 @@ function render(s) {
     <section id="actions"><h2>Actions for Nat <small>${A.length} open${p1 ? ", " + p1 + " urgent" : ""}</small></h2>${actions}${doneA}</section>
     <section id="doing"><h2>Doing <small>${(s.doing || []).length} cards, ${(s.doing || []).length - doingInternal} client, ${doingInternal} internal</small></h2>
       ${doing ? `<div class="grid">${doing}</div>` : `<div class="empty">Doing is empty.</div>`}</section>
-    <section id="blocked"><h2>Blocked <small>${(s.blocked || []).length}</small></h2>
+    <section id="blocked"><h2>Blocked <small>${(s.blocked || []).length} cards, ${(s.blocked || []).length - blockedInternal} client, ${blockedInternal} internal</small></h2>
       ${blocked ? `<ul class="rows">${blocked}</ul>` : `<div class="empty">Nothing is blocked.</div>`}</section>
     <div class="two">
       <section id="withclient"><h2>With client <small>${(s.with_client || []).length}</small></h2>

@@ -31,20 +31,23 @@ AUTH = f"key={_env['TRELLO_API_KEY']}&token={_env['TRELLO_API_TOKEN']}"
 
 # Savvy Otter Items board (mdS3ny24)
 ITEMS = "mdS3ny24"
-# Doing and Done are split into Client and Internal (Reid's request, 2026-10-20). There is no plain
-# "doing" or "done" id on purpose: pick the half with side() / doing_for() / done_for(). (move_card.py
-# and create_card.py accept "doing" / "done" and resolve them that way.)
+# Doing and Done are split into Client and Internal (Reid's request, 2026-10-20), and Blocked the same
+# way (2026-10-23). There is no plain "doing", "blocked" or "done" id on purpose: pick the half with
+# side() / doing_for() / blocked_for() / done_for(). (move_card.py and create_card.py accept "doing" /
+# "blocked" / "done" and resolve them that way.)
 LISTS = {
     "prioritized": "68d191dfd3eac683543a2487",
     "doing_client": "67a23dd892ed3fb5e94c0fea",
     "doing_internal": "6ad7bc00f1dc5ce79e2ed466",
-    "blocked": "67a23e373d8815df1c20a6cd",
+    "blocked_client": "6adb42f580b7e610e1ce1957",
+    "blocked_internal": "67a23e373d8815df1c20a6cd",  # the old single "Blocked" list, renamed
     "withclient": "67a3a892299d8b6c0478e413",
     "done_client": "67a23dd7893316d8822d07c7",
     "done_internal": "6ad7bc1e7fe02ddf4d6eb551",
     # "With External Dev" (67ed1b09...) is ARCHIVED on purpose; waiting on 515 = blocked.
 }
 DOING = {LISTS["doing_client"]: "client", LISTS["doing_internal"]: "internal"}
+BLOCKED = {LISTS["blocked_client"]: "client", LISTS["blocked_internal"]: "internal"}
 DONE = {LISTS["done_client"]: "client", LISTS["done_internal"]: "internal"}
 LABELS = {
     "project": "67a23dd748f259d85349dee0",
@@ -81,6 +84,10 @@ def side(name):
 
 def doing_for(name):
     return LISTS["doing_" + side(name)]
+
+
+def blocked_for(name):
+    return LISTS["blocked_" + side(name)]
 
 
 def done_for(name):
