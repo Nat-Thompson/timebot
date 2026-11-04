@@ -41,6 +41,12 @@ for col in ("client", "internal"):
 for a in get(f"boards/{ITEMS}/actions?filter=commentCard&since={since}&limit=50&fields=data,date"):
     print("COMMENT", a["date"][5:16], a["data"]["card"]["shortLink"], "|", a["data"]["text"].split("\n")[0][:110])
 
+# Step 7c (meeting briefs) once went silent for weeks; every pass now says so if the calendar is stale.
+from meetings import check as calendar_check
+alarm = calendar_check()
+if alarm:
+    print(alarm, "-> run step 7c now (list_events, then python meetings.py plan)")
+
 if DRY:
     print("dry run at", now, "comments since", since, "(baseline not refreshed)")
 else:
