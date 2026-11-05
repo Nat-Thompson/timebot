@@ -12,7 +12,7 @@ Card conventions:
 import os
 import re
 import logging
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from zoneinfo import ZoneInfo
 
 import boto3
@@ -75,11 +75,20 @@ def get_card_actions_today(card_id: str, today: date) -> list:
         f"/cards/{card_id}/actions",
         {"filter": "commentCard,updateCard,createCard", "limit": 100},
     )
-    return [
-        a for a in actions
-        if datetime.fromisoformat(a["date"].replace("Z", "+00:00"))
-                   .astimezone(CENTRAL_TZ).date() == today
-    ]
+    result = []
+    for a in actions:
+        system_date = (
+            datetime.fromisoformat(a["date"].replace("Z", "+00:00"))
+            .astimezone(CENTRAL_TZ).date()
+        )
+        if a["type"] == "commentCard":
+            backdate = parse_backdate(a["data"].get("text", ""))
+            effective_date = backdate if backdate else system_date
+        else:
+            effective_date = system_date
+        if effective_date == today:
+            result.append(a)
+    return result
 
 
 # ── Parsing helpers ────────────────────────────────────────────────────────────
@@ -112,11 +121,24 @@ def parse_project_name(card: dict) -> str | None:
     return m.group(1).strip() if m else None
 
 
+def parse_backdate(text: str):
+    """
+    Extract [date: YYYY-MM-DD] from a comment body, if present.
+    Returns a date object or None.
+    Example: '[date: 2026-03-18] 6h SavvySync work'
+    """
+    from datetime import date as _date
+    m = re.search(r'\[date:\s*(\d{4}-\d{2}-\d{2})\]', text, re.IGNORECASE)
+    return _date.fromisoformat(m.group(1)) if m else None
+
+
 def parse_time_minutes(text: str) -> int:
     """
     Parse explicit duration notation only — ignores clock times (8:30 am, 10:00 - 10:20).
     Recognized: 2h, 2hr, 2hrs, 2 hours, 1.5h, .5 hours, 30m, 30 min, 20 minutes, 0.25 hours
+    Also strips [date: ...] tags before parsing so they don't confuse the regex.
     """
+    text = re.sub(r'\[date:\s*\d{4}-\d{2}-\d{2}\]', '', text, flags=re.IGNORECASE)
     total = 0.0
     lower = text.lower()
     for m in re.finditer(r"(?<!\d)(\d*\.\d+|\d+)\s*h(?:r|rs|our|ours)?(?!\w)", lower):
@@ -453,8 +475,244 @@ def send_email(subject: str, html_body: str) -> None:
     log.info("Email sent → %s", SES_TO)
 
 
+# ── Morning report (event {"report": "morning"}) ──────────────────────────────
+# Counts Tempo comments in Nat's standard format, keyed on the [date:] work date:
+#   line 1 = "[date: YYYY-MM-DD] <summary> - <N> minutes"
+# Comments without a [date:] first line are not Tempo and are ignored.
+TEMPO_LINE_RE = re.compile(r"^\s*\[date:\s*(\d{4}-\d{2}-\d{2})\]\s*(.*)$", re.IGNORECASE)
+TEMPO_MINS_RE = re.compile(r"-\s*(\d+(?:\.\d+)?)\s*min(?:ute)?s?\b", re.IGNORECASE)
+
+# Trello label -> (report label, billable?). Legacy "Support - Warranty" means billable
+# and "Support - Non Warranty" means non-billable (see ALEXANDRIA tempo.md).
+LABEL_MAP = {
+    "Project":                ("project",             True),
+    "Support - Billable":     ("support-billable",    True),
+    "Support - Warranty":     ("support-billable",    True),
+    "Change Order":           ("change-order",        True),
+    "Retainer":               ("retainer",            True),
+    "Support - Non Billable": ("support-nonbillable", False),
+    "Support - Non Warranty": ("support-nonbillable", False),
+    "Operations":             ("operations",          False),
+}
+LABEL_ORDER = ["project", "support-billable", "change-order", "retainer",
+               "support-nonbillable", "operations", "unlabeled"]
+
+
+def parse_tempo_line(text: str):
+    """Return (work_date, summary, minutes) from a Tempo comment, or None if not Tempo.
+    minutes is None when the line has a [date:] but no '- N minutes'."""
+    first = (text or "").strip().splitlines()[0] if (text or "").strip() else ""
+    m = TEMPO_LINE_RE.match(first)
+    if not m:
+        return None
+    rest = m.group(2)
+    hits = list(TEMPO_MINS_RE.finditer(rest))
+    if not hits:
+        return date.fromisoformat(m.group(1)), rest.strip(), None
+    last = hits[-1]
+    return date.fromisoformat(m.group(1)), rest[:last.start()].strip(), round(float(last.group(1)))
+
+
+def card_label(card: dict) -> tuple[str, bool]:
+    for label in card.get("labels", []):
+        if label.get("name", "").strip() in LABEL_MAP:
+            return LABEL_MAP[label["name"].strip()]
+    return ("unlabeled", False)
+
+
+def morning_windows(today: date) -> dict:
+    """Yesterday (Fri to Sun on a Monday), week to date (Mon of yesterday's week),
+    month to date (1st of yesterday's month). All inclusive, Central dates."""
+    end = today - timedelta(days=1)
+    y_start = today - timedelta(days=3) if today.weekday() == 0 else end
+    return {
+        "yesterday": (y_start, end),
+        "week":      (end - timedelta(days=end.weekday()), end),
+        "month":     (end.replace(day=1), end),
+    }
+
+
+def get_board_comments_since(since: date) -> list:
+    """All commentCard actions on the board posted on/after `since` (Central), paginated."""
+    since_utc = datetime.combine(since, datetime.min.time(), CENTRAL_TZ).astimezone(ZoneInfo("UTC"))
+    out, before = [], None
+    while True:
+        params = {"filter": "commentCard", "limit": 1000, "since": since_utc.strftime("%Y-%m-%dT%H:%M:%SZ")}
+        if before:
+            params["before"] = before
+        page = trello_get(f"/boards/{TRELLO_BOARD_ID}/actions", params)
+        out.extend(page)
+        if len(page) < 1000:
+            return out
+        before = page[-1]["id"]
+
+
+def collect_tempo(today: date) -> tuple[list, list, dict]:
+    windows = morning_windows(today)
+    start = min(w[0] for w in windows.values())
+    end = max(w[1] for w in windows.values())
+    cards = {c["id"]: c for c in trello_get(
+        f"/boards/{TRELLO_BOARD_ID}/cards/all", {"fields": "name,labels,url,closed"})}
+
+    entries, problems = [], []
+    for a in get_board_comments_since(start):
+        parsed = parse_tempo_line(a["data"].get("text", ""))
+        if not parsed:
+            continue
+        work_date, summary, mins = parsed
+        if not (start <= work_date <= end):
+            continue
+        cref = a["data"].get("card", {})
+        card = cards.get(cref.get("id"), {"name": cref.get("name", "?"), "labels": [],
+                                          "url": f"https://trello.com/c/{cref.get('shortLink', '')}"})
+        tag, title = parse_tag(card["name"])
+        label, billable = card_label(card)
+        entry = {"date": work_date, "tag": tag.upper(), "title": title, "url": card.get("url", ""),
+                 "label": label, "billable": billable, "summary": summary, "minutes": mins or 0}
+        if mins is None:
+            problems.append({**entry, "why": "has [date:] but no '- N minutes' on line 1"})
+            continue
+        entries.append(entry)
+        if label == "unlabeled":
+            problems.append({**entry, "why": "card has no billing label"})
+    entries.sort(key=lambda e: (e["date"], e["tag"], e["title"].lower()))
+    return entries, problems, windows
+
+
+def fmt_mins(minutes: int) -> str:
+    h, m = divmod(int(minutes), 60)
+    return f"{h}h {m:02d}m" if h else f"{m}m"
+
+
+def fmt_hours(minutes: int) -> str:
+    return f"{minutes / 60:.2f}"
+
+
+def build_morning_html(entries: list, problems: list, windows: dict, today: date) -> str:
+    def esc(t) -> str:
+        return (str(t).replace("&", "&amp;").replace("<", "&lt;")
+                .replace(">", "&gt;").replace('"', "&quot;"))
+
+    def in_win(e, key):
+        s, t = windows[key]
+        return s <= e["date"] <= t
+
+    def day(d: date) -> str:
+        return d.strftime("%a %m/%d")
+
+    def span(key) -> str:
+        s, t = windows[key]
+        return day(s) if s == t else f"{day(s)} to {day(t)}"
+
+    keys = ["yesterday", "week", "month"]
+    tot = {k: sum(e["minutes"] for e in entries if in_win(e, k)) for k in keys}
+    bill = {k: sum(e["minutes"] for e in entries if in_win(e, k) and e["billable"]) for k in keys}
+
+    th = "style='background:#1a1a2e;color:#fff;padding:6px 10px;text-align:left;font-size:12px'"
+    thr = "style='background:#1a1a2e;color:#fff;padding:6px 10px;text-align:right;font-size:12px'"
+    td = "style='padding:6px 10px;border-bottom:1px solid #eee;font-size:13px;vertical-align:top'"
+    tdr = "style='padding:6px 10px;border-bottom:1px solid #eee;font-size:13px;text-align:right;white-space:nowrap'"
+    tdb = "style='padding:6px 10px;font-size:13px;font-weight:bold;background:#f4f6f9'"
+    tdbr = "style='padding:6px 10px;font-size:13px;font-weight:bold;background:#f4f6f9;text-align:right;white-space:nowrap'"
+    table = "style='border-collapse:collapse;width:100%;max-width:900px;margin:6px 0 22px 0'"
+    h2 = "style='font-size:16px;margin:18px 0 4px 0;color:#1a1a2e'"
+
+    # KPI table
+    kpi = "".join(
+        f"<tr><td {td}><b>{label}</b><br><span style='color:#6b7280;font-size:12px'>{span(k)}</span></td>"
+        f"<td {tdr}><b>{fmt_mins(tot[k])}</b></td><td {tdr}>{fmt_mins(bill[k])}</td>"
+        f"<td {tdr}>{fmt_mins(tot[k] - bill[k])}</td></tr>"
+        for k, label in [("yesterday", "Yesterday"), ("week", "Week to date"), ("month", "Month to date")])
+
+    # Yesterday's entries
+    multi_day = windows["yesterday"][0] != windows["yesterday"][1]
+    y_rows = ""
+    for e in (e for e in entries if in_win(e, "yesterday")):
+        date_cell = f"<td {td}>{day(e['date'])}</td>" if multi_day else ""
+        color = "#065f46" if e["billable"] else "#6b7280"
+        y_rows += (f"<tr>{date_cell}<td {td}><b>{esc(e['tag'])}</b></td>"
+                   f"<td {td}><a href='{esc(e['url'])}' style='color:#0066cc'>{esc(e['title'])}</a>"
+                   f"<br><span style='color:#6b7280;font-size:12px'>{esc(e['summary'])}</span></td>"
+                   f"<td {td}><span style='color:{color}'>{esc(e['label'])}</span></td>"
+                   f"<td {tdr}>{e['minutes']}</td></tr>")
+    if not y_rows:
+        y_rows = f"<tr><td {td} colspan='{5 if multi_day else 4}'>No Tempo entries.</td></tr>"
+    y_rows += (f"<tr><td {tdb} colspan='{4 if multi_day else 3}'>Total</td>"
+               f"<td {tdbr}>{tot['yesterday']} ({fmt_mins(tot['yesterday'])})</td></tr>")
+    y_head = (f"<tr>{f'<th {th}>Date</th>' if multi_day else ''}<th {th}>Client</th><th {th}>Card</th>"
+              f"<th {th}>Label</th><th {thr}>Minutes</th></tr>")
+
+    # Totals grids (hours) by client and by label
+    def grid(group_key, order=None):
+        groups = {}
+        for e in entries:
+            groups.setdefault(e[group_key], {k: 0 for k in keys})
+            for k in keys:
+                if in_win(e, k):
+                    groups[e[group_key]][k] += e["minutes"]
+        names = [n for n in order if n in groups] if order else sorted(groups)
+        rows = "".join(f"<tr><td {td}>{esc(n)}</td>" + "".join(
+            f"<td {tdr}>{fmt_hours(groups[n][k]) if groups[n][k] else ''}</td>" for k in keys) + "</tr>"
+            for n in names)
+        rows += f"<tr><td {tdb}>Total</td>" + "".join(f"<td {tdbr}>{fmt_hours(tot[k])}</td>" for k in keys) + "</tr>"
+        return (f"<table {table}><tr><th {th}>{'Client' if group_key == 'tag' else 'Label'}</th>"
+                f"<th {thr}>Yesterday</th><th {thr}>Week to date</th><th {thr}>Month to date</th></tr>{rows}</table>")
+
+    bvn = (f"<table {table}><tr><th {th}></th><th {thr}>Yesterday</th><th {thr}>Week to date</th>"
+           f"<th {thr}>Month to date</th></tr>"
+           f"<tr><td {td}><b>Billable</b></td>" + "".join(f"<td {tdr}>{fmt_hours(bill[k])}</td>" for k in keys) + "</tr>"
+           f"<tr><td {td}><b>Non-billable</b></td>" + "".join(f"<td {tdr}>{fmt_hours(tot[k] - bill[k])}</td>" for k in keys) + "</tr>"
+           f"<tr><td {tdb}>Total</td>" + "".join(f"<td {tdbr}>{fmt_hours(tot[k])}</td>" for k in keys) + "</tr></table>")
+
+    prob_html = ""
+    if problems:
+        items = "".join(f"<li>{day(p['date'])} <b>{esc(p['tag'])}</b> "
+                        f"<a href='{esc(p['url'])}' style='color:#0066cc'>{esc(p['title'])}</a>: {esc(p['why'])}</li>"
+                        for p in problems)
+        prob_html = (f"<h2 {h2}>Needs a look</h2><ul style='font-size:13px;color:#92400e'>{items}</ul>")
+
+    generated = datetime.now(CENTRAL_TZ).strftime("%Y-%m-%d %I:%M %p")
+    return f"""<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><title>TIMEBOT morning {today}</title></head>
+<body style="font-family:-apple-system,'Segoe UI',Arial,sans-serif;color:#1a1a2e;background:#ffffff;margin:0;padding:16px">
+<h1 style="font-size:20px;margin:0">TIMEBOT morning report: {day(windows['yesterday'][1]) if not multi_day else span('yesterday')}</h1>
+<p style="color:#6b7280;font-size:12px;margin:4px 0 12px 0">Generated {generated} Central. Counts Tempo comments by their [date:] work date (Central).</p>
+<table {table}><tr><th {th}></th><th {thr}>Total</th><th {thr}>Billable</th><th {thr}>Non-billable</th></tr>{kpi}</table>
+<h2 {h2}>Yesterday: {span('yesterday')}</h2>
+<table {table}>{y_head}{y_rows}</table>
+<h2 {h2}>Billable vs non-billable (hours)</h2>{bvn}
+<h2 {h2}>By client (hours)</h2>{grid('tag')}
+<h2 {h2}>By label (hours)</h2>{grid('label', LABEL_ORDER)}
+{prob_html}
+<p style="color:#9ca3af;font-size:11px">Billable = project, support-billable, change-order, retainer. Week starts Monday. Generated by TIMEBOT.</p>
+</body></html>"""
+
+
+def run_morning(today: date, send: bool = True) -> dict:
+    entries, problems, windows = collect_tempo(today)
+    y_start, y_end = windows["yesterday"]
+    y_mins = sum(e["minutes"] for e in entries if y_start <= e["date"] <= y_end)
+    wk_mins = sum(e["minutes"] for e in entries if windows["week"][0] <= e["date"] <= y_end)
+    mo_mins = sum(e["minutes"] for e in entries if windows["month"][0] <= e["date"] <= y_end)
+    label = y_end.strftime("%a %m/%d") if y_start == y_end else f"{y_start:%a %m/%d} to {y_end:%a %m/%d}"
+    subject = (f"TIMEBOT morning | {label} | {fmt_mins(y_mins)} | "
+               f"WTD {fmt_mins(wk_mins)} | MTD {fmt_mins(mo_mins)}")
+    html = build_morning_html(entries, problems, windows, today)
+    if send:
+        send_email(subject, html)
+    log.info("Morning done: %s", subject)
+    return {"statusCode": 200, "subject": subject, "entries": len(entries),
+            "problems": len(problems), "html": None if send else html}
+
+
 # ── Handler ────────────────────────────────────────────────────────────────────
 def lambda_handler(event, context):
+    if (event or {}).get("report") == "morning":
+        today = date.fromisoformat(event["today"]) if event.get("today") else datetime.now(CENTRAL_TZ).date()
+        result = run_morning(today)
+        result.pop("html", None)
+        return result
+
     today    = datetime.now(CENTRAL_TZ).date()
     log.info("Timebot starting — reporting for %s", today)
 
@@ -476,3 +734,13 @@ def lambda_handler(event, context):
 
     log.info("Done — %d cards, %s", len(summaries), minutes_to_str(total_mins))
     return {"statusCode": 200, "cards": len(summaries), "totalTime": minutes_to_str(total_mins)}
+
+
+# ── Local dry run: python lambda_function.py --morning 2026-11-05 out.html ─────
+if __name__ == "__main__":
+    import sys
+    if len(sys.argv) >= 4 and sys.argv[1] == "--morning":
+        res = run_morning(date.fromisoformat(sys.argv[2]), send=False)
+        with open(sys.argv[3], "w", encoding="utf-8") as f:
+            f.write(res.pop("html"))
+        print(res)
