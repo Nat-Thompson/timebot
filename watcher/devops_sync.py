@@ -11,8 +11,9 @@ Rules (set by Nat, 2026-10-01):
   2. When a Dev Ops card changes list, its linked Items card (desc contains the Dev Ops shortlink)
      moves to Doing: Doing (Internal) for [SAVVYOTTER] cards, Doing (Client) for client cards
      (_trello.side(), Nat 2026-10-20). Exceptions: moves INTO Dev Ops "Done" are cleanup and are
-     ignored; a card already in either Doing stays put; an Items card in either Done is NOT
-     reopened when the Dev Ops card reaches "Deployed to Prod".
+     ignored; a card already in either Doing stays put; a card in either Blocked stays put too
+     (Nat 2026-11-05: it is waiting on someone, so log the move and leave it); an Items card in
+     either Done is NOT reopened when the Dev Ops card reaches "Deployed to Prod".
   3. A moved Dev Ops card with no linked Items card prints "UNLINKED MOVE": match it by hand
      (Nat's hand-made Items cards often lack links), add the link to the Items desc, then move it.
      Never auto-create those, because that duplicates his cards.
@@ -22,7 +23,7 @@ import json
 import os
 import re
 import sys
-from _trello import DEVOPS, DOING, DONE, LABELS, LISTS, STATE, call, doing_for, get, items_cards
+from _trello import BLOCKED, DEVOPS, DOING, DONE, LABELS, LISTS, STATE, call, doing_for, get, items_cards
 
 SEEN = os.path.join(STATE, "devops_seen.json")
 POSITIONS = os.path.join(STATE, "devops_lists.json")
@@ -32,8 +33,12 @@ CLIENTS = {  # Dev Ops prefix (lowercased, letters only) -> Items prefix
     "downtoearth": "DOWNTOEARTH", "dte": "DOWNTOEARTH", "flowerpower": "SCOTTBYRON",
     "sbcflowerpower": "SCOTTBYRON", "flowerpowernetproject": "SCOTTBYRON", "nextlevel": "NEXTLEVEL",
     "strata": "STRATA", "focalpointe": "FOCALPOINTE", "focalpointecashapp": "FOCALPOINTE",
-    "focalpointearapp": "FOCALPOINTE", "fpyooz": "FOCALPOINTE", "perdido": "PERDIDO",
+    "focalpointearapp": "FOCALPOINTE", "fpyooz": "FOCALPOINTE", "fp": "FOCALPOINTE",
+    "alanhorticulture": "ALANHORT", "alanhort": "ALANHORT", "scottbyron": "SCOTTBYRON", "perdido": "PERDIDO",
     "smartlink": "SMARTLINK", "winterberry": "WINTERBERRY", "diamond": "DIAMOND", "greenery": "GREENERY",
+    "diamondpaylocity": "DIAMOND", "diamondlandscapingfieldclix": "DIAMOND", "diamondlandscaping": "DIAMOND", "timberlineukg": "TIMBERLINE", "timberlinesage": "TIMBERLINE",
+    "timberline": "TIMBERLINE", "lawnpro": "LAWNPRO", "thelawnpro": "LAWNPRO",
+    "lawnpestsolutions": "LAWNPEST", "lawnpest": "LAWNPEST",
     "thegreenery": "GREENERY", "heartland": "HEARTLAND", "heartlandadp": "HEARTLAND",
     "ironclad": "IRONCLAD", "botanical": "BOTANICALDESIGNS", "botanicaldesigns": "BOTANICALDESIGNS",
     "atlasrfid": "ATLASRFID", "atlasre": "ATLASREALESTATE", "landscapeportal": "SAVVYOTTER",
@@ -103,6 +108,8 @@ for c in moved:
         target = doing_for(m["name"])
         if m["idList"] in DOING:
             print(f"ALREADY IN DOING ({DOING[m['idList']]})", m["shortLink"], "<-", c["shortLink"], frm, "->", to)
+        elif m["idList"] in BLOCKED:
+            print(f"KEEP BLOCKED ({BLOCKED[m['idList']]})", m["shortLink"], "<-", c["shortLink"], frm, "->", to)
         elif m["idList"] in DONE and to.strip().lower() == "deployed to prod":
             print(f"KEEP DONE ({DONE[m['idList']]})", m["shortLink"], "<-", c["shortLink"], frm, "->", to)
         elif DRY:
